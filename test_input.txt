@@ -1,0 +1,9 @@
+% Number of tests: 5
+% Number of machines: 3
+% Number of resources: 2
+
+test( 't1', 10, ['m1'], ['r1'])
+test( 't2', 15, ['m2', 'm3'], [])
+test( 't3', 20, [], ['r1', 'r2'])
+test( 't4', 12, ['m1', 'm3'], ['r2'])
+test( 't5', 8, [], [])
