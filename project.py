@@ -1,94 +1,99 @@
-from minizinc import Instance, Model, Solver
-import numpy as np
+import sys
 import re
+from collections import defaultdict
 
-# Read the input file
-with open('input.txt', 'r') as file:
-    lines = file.readlines()
+from minizinc import Instance, Model, Solver
 
-# Parse the number of tests, machines, resources, and maximum makespan
-data = {}
-data['num_tests'] = int(lines[0].split(':')[1].strip())
-data['num_machines'] = int(lines[1].split(':')[1].strip())
-data['num_resources'] = int(lines[2].split(':')[1].strip())  # This is not currently used in the model
-data['max_makespan'] = int(lines[3].split(':')[1].strip())
 
-# Initialize dictionary with lists to store test data
-data['names'] = []
-data['durations'] = []
-data['machines'] = []
-data['resources'] = []  # Not currently used in the model
-
-# Function to clean up names (removes 'test(' and extracts only the test identifier)
-def clean_name(raw_name):
-    return re.search(r"’(\w+)’", raw_name).group(1)  # Extracts 't1', 't2', etc.
-
-# Function to clean up machines/resources (removes unwanted characters and empty strings)
-def clean_list(raw_str):
-    # Replace non-standard quotes with standard single quotes
-    raw_str = raw_str.replace('’', "'")
+# Read input file and return tests, machines, and resources
+# Example input file:
+#% Number of tests: 5
+#% Number of machines: 3
+#% Number of resources: 2
+#
+#test( 't1', 10, ['m1'], ['r1'])
+#test( 't2', 15, ['m2', 'm3'], [])
+#test( 't3', 20, [], ['r1', 'r2'])
+#test( 't4', 12, ['m1', 'm3'], ['r2'])
+#test( 't5', 8, [], [])
+def read_input(filename):
+    data = {
+        'tests': [],
+        'machines': set(),
+        'resources': set()
+    }
     
-    # Remove brackets, parentheses, and extra characters
-    items = [item.strip("'").strip('()').strip('[]').strip() for item in raw_str.strip('[]').split(',') if item.strip()]
+    # Compile the regex pattern once
+    pattern = re.compile(r"test\(\s*'([^']+)',\s*(\d+),\s*(\[.*?\]),\s*(\[.*?\])\s*\)")
     
-    # Filter out empty strings and clean quotes
-    items = [item.strip("'") for item in items if item]
+    def parse_list(s):
+        return [item.strip()[1:-1] for item in s[1:-1].split(',')] if s != '[]' else []
+
+    with open(filename, 'r') as f:
+        for line in f:
+            if line.startswith('test('):
+                match = pattern.match(line.strip())
+                if match:
+                    name, duration, machines, resources = match.groups()
+                    
+                    machines = parse_list(machines)
+                    resources = parse_list(resources)
+                    
+                    data['tests'].append({
+                        'name': name,
+                        'duration': int(duration),
+                        'machines': machines,
+                        'resources': resources
+                    })
+                    
+                    data['machines'].update(machines)
+                    data['resources'].update(resources)
+
+    data['machines'] = sorted(data['machines'])
+    data['resources'] = sorted(data['resources'])
+    return data
+
+def create_minizinc_model(data):
+    model = Model()
     
-    return items if items else []
-
-# Parse test data
-for line in lines[4:]:
-    parts = line.strip().split(',')
+    # Parametros (passamos como parametros para o modelo)
+    model["n_tests"] = len(data['tests'])
+    model["n_machines"] = len(data['machines'])
+    model["n_resources"] = len(data['resources'])
+    model["durations"] = [test['duration'] for test in data['tests']]
     
-    # Extract and clean test name, duration, machines, and resources
-    test_name = clean_name(parts[0].strip())
-    duration = int(parts[1].strip())
+
+    return model
+
+def print_debug_info(data):
+    print("\nTests:")
+    for test in data['tests']:
+        print(f"  {test['name']}: duration={test['duration']}, machines={test['machines']}, resources={test['resources']}")
+    print(f"\nMachines: {data['machines']}")
+    print(f"Resources: {data['resources']}")
+    print(f"\nNumber of tests: {len(data['tests'])}")
+    print(f"Number of machines: {len(data['machines'])}")
+    print(f"Number of resources: {len(data['resources'])}")
+
+if __name__ == "__main__":
+    if len(sys.argv) != 3:
+        print("Usage: python proj.py <input-file> <output-file>")
+        sys.exit(1)
     
-    machine_list = clean_list(parts[2].strip())  # Clean up machine list
-    resource_list = clean_list(parts[3].strip())  # Clean up resource list (no brackets)
-
-    # Append values to respective lists in the dictionary
-    data['names'].append(test_name)
-    data['durations'].append(duration)
-    data['machines'].append(machine_list)
-    data['resources'].append(resource_list)
-
-# Print the parsed test data for verification
-print('Parsed Test Data:')
-print(f"Names: {data['names']}")
-print(f"Durations: {data['durations']}")
-print(f"Machines: {data['machines']}")
-print(f"Resources: {data['resources']}")
-
-model = minizinc.Model()
-model.add_file("model.mzn")  # Your MiniZinc model file
-
-# Initialize the MiniZinc solver and instance
-solver = None
-instance = None
-try:
-    solver = minizinc.Solver.lookup("gecode")  # Ensure Gecode is installed
-    instance = minizinc.Instance(solver, model)
-except Exception as e:
-    print(f"Error initializing MiniZinc solver or instance: {e}")
-
-# Ensure that instance is created before setting parameters
-if instance:
-    # Pass input data to the MiniZinc instance
-    instance["N"] = data['num_tests']
-    instance["M"] = data['num_machines']
-    instance["max_makespan"] = data['max_makespan']
-    instance["durations"] = data['durations']
-    instance["machines"] = data['machines']
+    input_file = sys.argv[1]
+    output_file = sys.argv[2]
     
-    # Solve the MiniZinc model
-    try:
-        result = instance.solve()
-        print(f"Solution: {result}")
-        print(f"Makespan: {result['makespan']}")
-        print(f"Assigned machines: {result['assigned_machines']}")
-        print(f"Start times: {result['start_times']}")
-    except Exception as e:
-        print(f"Error solving MiniZinc model: {e}")
-else:
-    print("MiniZinc instance was not created. Ensure that the MiniZinc model file and solver are correctly configured.")
+    data = read_input(input_file)
+    model = create_minizinc_model(data)
+    
+    # Create a MiniZinc instance and solve (to be implemented in future checkpoints)
+    #instance = Instance(Solver.lookup("chuffed"), model)
+    
+    print_debug_info(data)
+    
+    # TODO: Implement solving and output writing in future checkpoints
+
+    # Save the MiniZinc model to a file
+    with open("model.mzn", "w") as f:
+        f.write(str(model))
+    print("MiniZinc model written to 'model.mzn'")
