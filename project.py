@@ -1,6 +1,8 @@
 import sys
 from minizinc import Instance, Model, Solver, Status
 import re
+from datetime import timedelta
+
 
 def read_input(filename):
     problem_data = {
@@ -16,7 +18,10 @@ def read_input(filename):
 
     with open(filename, 'r') as f:
         for line in f:
-            if line.startswith('test('):
+            if line.startswith('% Number of machines'):
+                num_machines = int(line.split(':')[1].strip())
+                problem_data['machines'] = set(f'm{i}' for i in range(1, num_machines + 1))
+            elif line.startswith('test('):
                 match = pattern.match(line.strip())
                 if match:
                     name, duration, machines, resources = match.groups()
@@ -31,7 +36,6 @@ def read_input(filename):
                         'resources': resources
                     })
                     
-                    problem_data['machines'].update(machines)
                     problem_data['resources'].update(resources)
 
     problem_data['machines'] = sorted(problem_data['machines'])
@@ -39,7 +43,8 @@ def read_input(filename):
     return problem_data
 
 def create_minizinc_model(problem_data):
-    model = Model("model.mzn")  # Load your MiniZinc model file
+    model = Model()
+    model.add_string(open("model.mzn").read())
     
     # Set up the parameters for the model
     model["M"] = len(problem_data['machines'])
@@ -51,7 +56,7 @@ def create_minizinc_model(problem_data):
     machine_sets = []
     for test in problem_data['tests']:
         if not test['machines']:
-            machine_sets.append(set(range(1, len(problem_data['machines']) + 1)))
+            machine_sets.append(set())
         else:
             machine_sets.append({problem_data['machines'].index(m) + 1 for m in test['machines']})
     model["machines"] = machine_sets
@@ -61,13 +66,10 @@ def create_minizinc_model(problem_data):
     for test in problem_data['tests']:
         resource_sets.append({problem_data['resources'].index(r) + 1 for r in test['resources']})
     model["resources"] = resource_sets
-    
-    # Set a reasonable upper bound for the makespan
-    model["max_makespan"] = sum(model["durations"])
-    
+
     return model
 
-def solve_model(model):
+def solve_model(model): # Not used for now 
     instance = Instance(Solver.lookup("chuffed"), model)
     result = instance.solve()
     return result
@@ -109,15 +111,22 @@ if __name__ == "__main__":
     
     print_debug_info(problem_data)
     
-    result = solve_model(model)
+    # Try different solvers if one takes too long or doesnt work
+    solvers = ["chuffed", "gecode", "or-tools"]
+    for solver_name in solvers:
+        print(f"\nTrying solver: {solver_name}")
+        instance = Instance(Solver.lookup(solver_name), model)
+        result = instance.solve(timeout=timedelta(milliseconds=500))
+        
+        if result.status == Status.OPTIMAL_SOLUTION or result.status == Status.SATISFIED:
+            write_output(result, problem_data, output_file)
+            print(f"Solution written to {output_file}")
+            break
+        elif result.status == Status.UNSATISFIABLE:
+            print("The problem is unsatisfiable")
+            break
+        else:
+            print(f"Solving process ended with status: {result.status}")
     
-    if result.status == Status.OPTIMAL_SOLUTION:
-        write_output(result, problem_data, output_file)
-        print(f"Solution written to {output_file}")
-    elif result.status == Status.SATISFIED:
-        write_output(result, problem_data, output_file)
-        print(f"Satisfactory solution written to {output_file}")
-    elif result.status == Status.UNSATISFIABLE:
-        print("The problem is unsatisfiable")
-    else:
-        print(f"Solving process ended with status: {result.status}")
+    if result.status not in [Status.OPTIMAL_SOLUTION, Status.SATISFIED, Status.UNSATISFIABLE]:
+        print("Failed to find a solution with any solver.")

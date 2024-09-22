@@ -1,60 +1,89 @@
-% Number of machines
+include "globals.mzn";
+
+% Parameters
 int: M;  % Number of machines
-
-% Number of tasks
-int: N;  % Number of tasks
-
-% Number of resources
+int: N;  % Number of tests
 int: R;  % Number of resources
 
-% Task durations
-array[1..N] of int: durations;  % Task durations
+set of int: TESTS = 1..N;
+set of int: MACHINES = 1..M;
+set of int: RESOURCES = 1..R;
 
-% Machines each task can run on (array of sets)
-array[1..N] of set of int: machines;  % Machines available for each task
+array[TESTS] of int: durations;
+array[TESTS] of set of MACHINES: machines;
+array[TESTS] of set of RESOURCES: resources;
 
-% Resource usage for each task (set of resources each task uses)
-array[1..N] of set of int: resources;  % Resources used by each task
+% Decision Variables
+array[TESTS] of var 0..sum(durations): start_times;
+array[TESTS] of var MACHINES: assigned_machines;
+var 0..sum(durations): makespan;
 
-% Makespan upper bound
-int: max_makespan;  % Maximum makespan
+% Auxiliary Variables
+array[TESTS] of var 0..sum(durations): end_times;
 
-% Decision variables: start time and machine assignment for each task
-array[1..N] of var 0..max_makespan: start_times;
-array[1..N] of var 1..M: assigned_machines;
+% Constraints
 
-% End times of the tasks
-array[1..N] of var 0..max_makespan: end_times;
-
-% Constraint: end time is start time plus duration
-constraint forall(task in 1..N) (
-  end_times[task] = start_times[task] + durations[task]
+% End times calculation
+constraint forall(t in TESTS) (
+    end_times[t] = start_times[t] + durations[t]
 );
 
-% Constraint: makespan is the maximum of the end times
-var 0..max_makespan: makespan;
+% Makespan definition
 constraint makespan = max(end_times);
 
-% Constraint: while the task is running on a machine, no other task can use that machine
-constraint forall(m in 1..M) (
-  forall(task1 in 1..N, task2 in 1..N where task1 < task2) (
-    (assigned_machines[task1] = m /\ assigned_machines[task2] = m) ->
-    (start_times[task1] >= end_times[task2] \/ start_times[task2] >= end_times[task1])
-  )
+% Machine assignment
+constraint forall(t in TESTS) (
+    if card(machines[t]) > 0 then
+        assigned_machines[t] in machines[t]
+    else
+        assigned_machines[t] in MACHINES
+    endif
 );
 
-% Modified Constraint: task must be assigned to one of its executable machines,
-% or if the machine set is empty, it can run on any machine
-constraint forall(task in 1..N) (
-  (machines[task] = {}) -> (assigned_machines[task] >= 1 /\ assigned_machines[task] <= M) /\
-  (machines[task] != {}) -> (assigned_machines[task] in machines[task])
+% Machine capacity (using cumulative)
+constraint forall(m in MACHINES) (
+    cumulative(start_times, 
+               [durations[t] | t in TESTS], 
+               [bool2int(assigned_machines[t] = m) | t in TESTS],
+               1)
 );
 
-% Modified Constraint: no two tasks that use a global resource can overlap
-% If the resource set is empty, no constraint applies
-constraint forall(t1 in 1..N, t2 in 1..N where t1 < t2) (
-  (resources[t1] != {} /\ resources[t2] != {} /\ (resources[t1] intersect resources[t2] != {})) ->
-  (start_times[t1] >= end_times[t2] \/ start_times[t2] >= end_times[t1])
+% Resource constraints (using cumulative)
+constraint forall(r in RESOURCES) (
+    cumulative(start_times,
+               durations,
+               [bool2int(r in resources[t]) | t in TESTS],
+               1)
 );
 
-solve minimize makespan;
+% Redundant constraint: total duration must be less than or equal to makespan * number of machines
+constraint sum(durations) <= makespan * M;
+
+% Balance load across machines
+constraint forall(m in MACHINES)(
+    count(assigned_machines, m) <= N div M + 1  % Limit the number of tasks per machine
+);
+
+% Search annotation
+solve :: seq_search([
+    int_search(assigned_machines, first_fail, indomain_min),
+    int_search(start_times, smallest, indomain_min)
+]) minimize makespan;
+
+% Output
+output [
+    "% Makespan : \(makespan)\n"
+] ++ [
+    "machine( 'm\(m)', \(count(assigned_machines, m)), [" 
+    ++ join(", ", [ 
+        "('t\(t)',\(start_times[t])" 
+        ++ if card(resources[t]) > 0 then 
+            ",['" ++ join("','", [show(r) | r in resources[t]]) ++ "']" 
+        else 
+            "" 
+        endif
+        | t in TESTS where fix(assigned_machines[t]) = m
+    ]) 
+    ++ "])\n"
+    | m in MACHINES
+];
