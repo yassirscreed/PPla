@@ -1,29 +1,14 @@
 import sys
+from minizinc import Instance, Model, Solver, Status
 import re
-from collections import defaultdict
 
-from minizinc import Instance, Model, Solver
-
-
-# Read input file and return tests, machines, and resources
-# Example input file:
-#% Number of tests: 5
-#% Number of machines: 3
-#% Number of resources: 2
-#
-#test( 't1', 10, ['m1'], ['r1'])
-#test( 't2', 15, ['m2', 'm3'], [])
-#test( 't3', 20, [], ['r1', 'r2'])
-#test( 't4', 12, ['m1', 'm3'], ['r2'])
-#test( 't5', 8, [], [])
 def read_input(filename):
-    data = {
+    problem_data = {
         'tests': [],
         'machines': set(),
         'resources': set()
     }
     
-    # Compile the regex pattern once
     pattern = re.compile(r"test\(\s*'([^']+)',\s*(\d+),\s*(\[.*?\]),\s*(\[.*?\])\s*\)")
     
     def parse_list(s):
@@ -39,41 +24,77 @@ def read_input(filename):
                     machines = parse_list(machines)
                     resources = parse_list(resources)
                     
-                    data['tests'].append({
+                    problem_data['tests'].append({
                         'name': name,
                         'duration': int(duration),
                         'machines': machines,
                         'resources': resources
                     })
                     
-                    data['machines'].update(machines)
-                    data['resources'].update(resources)
+                    problem_data['machines'].update(machines)
+                    problem_data['resources'].update(resources)
 
-    data['machines'] = sorted(data['machines'])
-    data['resources'] = sorted(data['resources'])
-    return data
+    problem_data['machines'] = sorted(problem_data['machines'])
+    problem_data['resources'] = sorted(problem_data['resources'])
+    return problem_data
 
-def create_minizinc_model(data):
-    model = Model()
+def create_minizinc_model(problem_data):
+    model = Model("model.mzn")  # Load your MiniZinc model file
     
-    # Parametros (passamos como parametros para o modelo)
-    model["n_tests"] = len(data['tests'])
-    model["n_machines"] = len(data['machines'])
-    model["n_resources"] = len(data['resources'])
-    model["durations"] = [test['duration'] for test in data['tests']]
+    # Set up the parameters for the model
+    model["M"] = len(problem_data['machines'])
+    model["N"] = len(problem_data['tests'])
+    model["R"] = len(problem_data['resources'])
+    model["durations"] = [test['duration'] for test in problem_data['tests']]
     
-
+    # Set up the machines each task can run on
+    machine_sets = []
+    for test in problem_data['tests']:
+        if not test['machines']:
+            machine_sets.append(set(range(1, len(problem_data['machines']) + 1)))
+        else:
+            machine_sets.append({problem_data['machines'].index(m) + 1 for m in test['machines']})
+    model["machines"] = machine_sets
+    
+    # Set up the resources each task uses
+    resource_sets = []
+    for test in problem_data['tests']:
+        resource_sets.append({problem_data['resources'].index(r) + 1 for r in test['resources']})
+    model["resources"] = resource_sets
+    
+    # Set a reasonable upper bound for the makespan
+    model["max_makespan"] = sum(model["durations"])
+    
     return model
 
-def print_debug_info(data):
+def solve_model(model):
+    instance = Instance(Solver.lookup("chuffed"), model)
+    result = instance.solve()
+    return result
+
+def write_output(result, problem_data, output_file):
+    with open(output_file, 'w') as f:
+        f.write(f"% Makespan : {result['makespan']}\n")
+        for m in range(1, len(problem_data['machines']) + 1):
+            tasks = []
+            for i, (start, machine) in enumerate(zip(result['start_times'], result['assigned_machines'])):
+                if machine == m:
+                    test = problem_data['tests'][i]
+                    resources = ','.join(test['resources']) if test['resources'] else ''
+                    resources_str = f",['{resources}']" if resources else ''
+                    tasks.append(f"('{test['name']}',{start}{resources_str})")
+            if tasks:
+                f.write(f"machine( 'm{m}', {len(tasks)}, [{','.join(tasks)}])\n")
+
+def print_debug_info(problem_data):
     print("\nTests:")
-    for test in data['tests']:
+    for test in problem_data['tests']:
         print(f"  {test['name']}: duration={test['duration']}, machines={test['machines']}, resources={test['resources']}")
-    print(f"\nMachines: {data['machines']}")
-    print(f"Resources: {data['resources']}")
-    print(f"\nNumber of tests: {len(data['tests'])}")
-    print(f"Number of machines: {len(data['machines'])}")
-    print(f"Number of resources: {len(data['resources'])}")
+    print(f"\nMachines: {problem_data['machines']}")
+    print(f"Resources: {problem_data['resources']}")
+    print(f"\nNumber of tests: {len(problem_data['tests'])}")
+    print(f"Number of machines: {len(problem_data['machines'])}")
+    print(f"Number of resources: {len(problem_data['resources'])}")
 
 if __name__ == "__main__":
     if len(sys.argv) != 3:
@@ -83,17 +104,20 @@ if __name__ == "__main__":
     input_file = sys.argv[1]
     output_file = sys.argv[2]
     
-    data = read_input(input_file)
-    model = create_minizinc_model(data)
+    problem_data = read_input(input_file)
+    model = create_minizinc_model(problem_data)
     
-    # Create a MiniZinc instance and solve (to be implemented in future checkpoints)
-    #instance = Instance(Solver.lookup("chuffed"), model)
+    print_debug_info(problem_data)
     
-    print_debug_info(data)
+    result = solve_model(model)
     
-    # TODO: Implement solving and output writing in future checkpoints
-
-    # Save the MiniZinc model to a file
-    with open("model.mzn", "w") as f:
-        f.write(str(model))
-    print("MiniZinc model written to 'model.mzn'")
+    if result.status == Status.OPTIMAL_SOLUTION:
+        write_output(result, problem_data, output_file)
+        print(f"Solution written to {output_file}")
+    elif result.status == Status.SATISFIED:
+        write_output(result, problem_data, output_file)
+        print(f"Satisfactory solution written to {output_file}")
+    elif result.status == Status.UNSATISFIABLE:
+        print("The problem is unsatisfiable")
+    else:
+        print(f"Solving process ended with status: {result.status}")
