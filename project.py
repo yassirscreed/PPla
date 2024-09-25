@@ -47,7 +47,7 @@ def read_input(filename):
 
 def draw_schedule(problem_data, result):
     activities = [[] for _ in range(len(problem_data['machines']))]
-    for i, (start, machine) in enumerate(zip(result['start_times'], result['assigned_machines'])):
+    for i, (start, machine) in enumerate(zip(result['start_times'], result['assigned_machine'])):
         test = problem_data['tests'][i]
         activities[machine-1].append({
             'name': test['name'],
@@ -144,7 +144,7 @@ def write_output(result, problem_data, output_file):
         f.write(f"% Makespan : {result['makespan']}\n")
         for m in range(1, len(problem_data['machines']) + 1):
             tasks = []
-            for i, (start, machine) in enumerate(zip(result['start_times'], result['assigned_machines'])):
+            for i, (start, machine) in enumerate(zip(result['start_times'], result['assigned_machine'])):
                 if machine == m:
                     test = problem_data['tests'][i]
                     resources = ','.join(test['resources']) if test['resources'] else ''
@@ -176,11 +176,11 @@ if __name__ == "__main__":
     
     print_debug_info(problem_data)
     
-    solvers = ["chuffed", "gecode", "or-tools"]
+    solvers = ['com.google.ortools.sat', "chuffed", "gecode"]
     for solver_name in solvers:
         print(f"\nTrying solver: {solver_name}")
         instance = Instance(Solver.lookup(solver_name), model)
-        result = instance.solve(timeout=timedelta(seconds=30))
+        result = instance.solve(timeout=timedelta(seconds=10))
         
         if result.status == Status.OPTIMAL_SOLUTION or result.status == Status.SATISFIED:
             write_output(result, problem_data, output_file)
