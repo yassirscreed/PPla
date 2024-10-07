@@ -210,7 +210,7 @@ if __name__ == "__main__":
         if not args.test:
             print(f"\nTrying solver: {solver_name}")
         instance = Instance(Solver.lookup(solver_name), model)
-        result = instance.solve(timeout=timedelta(seconds=10))
+        result = instance.solve()
         
         if args.test:
             print(f"Makespan : {result['makespan']}")
