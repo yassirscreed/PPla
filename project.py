@@ -1,11 +1,13 @@
-import sys
 from minizinc import Instance, Model, Solver, Status
 import re
 from datetime import timedelta
 import matplotlib.pyplot as plt
 from matplotlib import patheffects
 import numpy as np
+import argparse
 
+p_lists = []
+p_order = []
 
 def read_input(filename):
     problem_data = {
@@ -52,7 +54,8 @@ def draw_schedule(problem_data, result):
         activities[machine-1].append({
             'name': test['name'],
             'start_time': start,
-            'duration': test['duration']
+            'duration': test['duration'],
+            'resources': test['resources']
         })
 
     end = result['makespan']
@@ -73,8 +76,8 @@ def draw_schedule(problem_data, result):
             start_time = activity['start_time']
             duration = activity['duration']
             end_time = start_time + duration
-            test = next(t for t in problem_data['tests'] if t['name'] == activity['name'])
-            color = color_map[test['resources'][0] if test['resources'] else '']
+            resources = activity['resources']
+            color = color_map[resources[0] if resources else '']
 
             # Draw the task bar
             ax.plot([start_time, end_time], [i, i], linewidth=16, solid_capstyle='butt', color=color)
@@ -87,7 +90,13 @@ def draw_schedule(problem_data, result):
             text_x = (start_time + end_time) / 2
             text_y = i
             fontsize = max(6, min(10, 120 // len(activity_line)))  # Adjust font size based on number of tasks
-            mytxt = ax.text(text_x, text_y, activity['name'], ha='center', va='center', color='white', fontsize=fontsize)
+            
+            # Include resource count in the text if there are multiple resources
+            display_text = activity['name']
+            if len(resources) > 1:
+                display_text += f" ({len(resources)}R)"
+            
+            mytxt = ax.text(text_x, text_y, display_text, ha='center', va='center', color='white', fontsize=fontsize)
             mytxt.set_path_effects([patheffects.withStroke(linewidth=2, foreground='black')])
 
     ax.set_yticks(range(1, n_machines + 1))
@@ -116,6 +125,28 @@ def create_minizinc_model(problem_data):
     model["R"] = len(problem_data['resources'])
     model["durations"] = [test['duration'] for test in problem_data['tests']]
     #model['max_makespan'] = sum(model["durations"]) + 1
+
+     # Calculate max_makespan in Python
+    max_makespan = sum(model["durations"])
+    model["max_makespan"] = max_makespan
+
+    # Calculate priority scores in Python, requirement first
+    priority_scores = []
+    for test in problem_data['tests']:
+        score = (test['duration'] * 10 +
+                 len(test['resources']) * 10000 +
+                 (len(problem_data['machines']) - len(test['machines'])))
+        priority_scores.append(score)
+    
+    model["priority_scores"] = priority_scores
+    p_lists.append(priority_scores)
+
+    # Calculate priority order in Python
+    priority_order = sorted(range(1, len(priority_scores) + 1), 
+                            key=lambda i: priority_scores[i-1], 
+                            reverse=True)
+    model["priority_order"] = priority_order
+    p_order.append(priority_order)
     
     # Set up the machines each task can run on
     machine_sets = []
@@ -133,11 +164,6 @@ def create_minizinc_model(problem_data):
     model["resources"] = resource_sets
 
     return model
-
-def solve_model(model): # Not used for now 
-    instance = Instance(Solver.lookup("chuffed"), model)
-    result = instance.solve()
-    return result
 
 def write_output(result, problem_data, output_file):
     with open(output_file, 'w') as f:
@@ -162,39 +188,47 @@ def print_debug_info(problem_data):
     print(f"\nNumber of tests: {len(problem_data['tests'])}")
     print(f"Number of machines: {len(problem_data['machines'])}")
     print(f"Number of resources: {len(problem_data['resources'])}")
+    print(f"\nPriority scores: {p_lists}")
+    print(f"\nPriority order: {p_order}")
 
 if __name__ == "__main__":
-    if len(sys.argv) != 3:
-        print("Usage: python proj.py <input-file> <output-file>")
-        sys.exit(1)
-    
-    input_file = sys.argv[1]
-    output_file = sys.argv[2]
-    
-    problem_data = read_input(input_file)
+    parser = argparse.ArgumentParser(description="Solve the scheduling problem.")
+    parser.add_argument("input_file", help="Input file path")
+    parser.add_argument("output_file", help="Output file path")
+    parser.add_argument("--test", action="store_true", help="Run in test mode (no plotting or debug output)")
+    args = parser.parse_args()
+
+    problem_data = read_input(args.input_file)
     model = create_minizinc_model(problem_data)
-    
-    print_debug_info(problem_data)
+
+
+    if not args.test:
+        print_debug_info(problem_data)
     
     solvers = ['com.google.ortools.sat', "chuffed", "gecode"]
     for solver_name in solvers:
-        print(f"\nTrying solver: {solver_name}")
+        if not args.test:
+            print(f"\nTrying solver: {solver_name}")
         instance = Instance(Solver.lookup(solver_name), model)
         result = instance.solve(timeout=timedelta(seconds=10))
         
+        if args.test:
+            print(f"Makespan : {result['makespan']}")
+        
         if result.status == Status.OPTIMAL_SOLUTION or result.status == Status.SATISFIED:
-            write_output(result, problem_data, output_file)
-            print(f"Solution written to {output_file}")
-            
-            # Draw the schedule
-            draw_schedule(problem_data, result)
-            
+            write_output(result, problem_data, args.output_file)
+            if not args.test:
+                print(f"Solution written to {args.output_file}")
+                draw_schedule(problem_data, result)
             break
         elif result.status == Status.UNSATISFIABLE:
-            print("The problem is unsatisfiable")
+            if not args.test:
+                print("The problem is unsatisfiable")
             break
         else:
-            print(f"Solving process ended with status: {result.status}")
+            if not args.test:
+                print(f"Solving process ended with status: {result.status}")
     
     if result.status not in [Status.OPTIMAL_SOLUTION, Status.SATISFIED, Status.UNSATISFIABLE]:
-        print("Failed to find a solution with any solver.")
+        if not args.test:
+            print("Failed to find a solution with any solver.")

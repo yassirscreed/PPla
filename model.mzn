@@ -9,8 +9,10 @@ array[1..N] of int: durations;
 array[1..N] of set of 1..M: machines;
 array[1..N] of set of 1..R: resources;
 
-% Calculate the maximum possible makespan
-int: max_makespan = sum(durations);
+int: max_makespan;
+
+array[1..N] of int: priority_scores;
+array[1..N] of int: priority_order;
 
 % VARIABLES
 array[1..N] of var 0..max_makespan: start_times;
@@ -22,13 +24,6 @@ var 0..max_makespan: makespan;
 array[1..N] of var 0..max_makespan: end_times;
 constraint forall(t in 1..N) (end_times[t] = start_times[t] + durations[t]);
 
-% Priority scores for search heuristic
-array[1..N] of int: priority_scores = [
-    durations[t] * 100 + 
-    card(resources[t]) * 10 + 
-    (M - card(machines[t]))
-    | t in 1..N
-];
 
 % Custom disjunctive predicate
 predicate custom_disjunctive(array[int] of var bool: b,
@@ -85,14 +80,23 @@ constraint
         )
     );
 
+% Symmetry breaking for tasks sharing all their machine choices
+ constraint forall(t1, t2 in 1..N where t1 < t2 /\ machines[t1] = machines[t2] /\ card(machines[t1]) > 0) (
+     start_times[t1] <= start_times[t2]
+ );
+
+ % Symmetry breaking for tasks with the same duration and overlapping machine choices
+ constraint forall(t1, t2 in 1..N where t1 < t2 /\ durations[t1] = durations[t2] /\ card(machines[t1] intersect machines[t2]) > 0)(
+    lex_less([start_times[t1], assigned_machine[t1]], [start_times[t2], assigned_machine[t2]])
+ );
+
+
+
 % Lower bound on makespan
 constraint
     makespan >= max([sum([durations[t] | t in 1..N where r in resources[t]]) | r in 1..R] ++ 
                     [sum([durations[t] | t in 1..N where m in machines[t]]) | m in 1..M]);
 
-% Define the priority order
-array[1..N] of int: priority_order = 
-    reverse(sort_by([i | i in 1..N], [priority_scores[i] | i in 1..N]));
 
 % Custom search annotation based on priority order
 ann: priority_search(array[int] of var int: x) = 

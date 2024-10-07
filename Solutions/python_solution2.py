@@ -1,3 +1,4 @@
+#Alternative solution to the problem 
 import sys
 
 def parse_input(filename):
