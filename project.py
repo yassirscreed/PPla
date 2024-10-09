@@ -124,11 +124,11 @@ def create_minizinc_model(problem_data):
     model["N"] = len(problem_data['tests'])
     model["R"] = len(problem_data['resources'])
     model["durations"] = [test['duration'] for test in problem_data['tests']]
-    #model['max_makespan'] = sum(model["durations"]) + 1
 
      # Calculate max_makespan in Python
     max_makespan = sum(model["durations"])
     model["max_makespan"] = max_makespan
+    print(f"Max makespan: {max_makespan}")
 
     # Calculate priority scores in Python, requirement first
     priority_scores = []
@@ -175,9 +175,10 @@ def write_output(result, problem_data, output_file):
                     test = problem_data['tests'][i]
                     resources = ','.join(test['resources']) if test['resources'] else ''
                     resources_str = f",['{resources}']" if resources else ''
-                    tasks.append(f"('{test['name']}',{start}{resources_str})")
+                    tasks.append((start, f"('{test['name']}',{start}{resources_str})"))
             if tasks:
-                f.write(f"machine( 'm{m}', {len(tasks)}, [{','.join(tasks)}])\n")
+                sorted_tasks = [task[1] for task in sorted(tasks, key=lambda x: x[0])]
+                f.write(f"machine( 'm{m}', {len(sorted_tasks)}, [{','.join(sorted_tasks)}])\n")
 
 def print_debug_info(problem_data):
     print("\nTests:")
@@ -210,7 +211,7 @@ if __name__ == "__main__":
         if not args.test:
             print(f"\nTrying solver: {solver_name}")
         instance = Instance(Solver.lookup(solver_name), model)
-        result = instance.solve()
+        result = instance.solve(timeout=timedelta(seconds=20))
         
         if args.test:
             print(f"Makespan : {result['makespan']}")

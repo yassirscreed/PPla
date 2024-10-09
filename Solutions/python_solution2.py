@@ -1,5 +1,8 @@
 #Alternative solution to the problem 
 import sys
+import matplotlib.pyplot as plt
+from matplotlib import patheffects
+import numpy as np
 
 def parse_input(filename):
     tasks = {}
@@ -97,6 +100,73 @@ def run_schedule(tasks, machines_list, resource_list, tasks_sort_method):
     print('Makespan (', tasks_sort_method, ')', max_time)
     return max_time, results
 
+def draw_schedule(tasks, machines_list, resource_list, schedule):
+    activities = [[] for _ in range(len(machines_list))]
+    for task, start_time, machine in schedule:
+        machine_index = machines_list.index(machine)
+        activities[machine_index].append({
+            'name': task,
+            'start_time': start_time,
+            'duration': tasks[task]['duration'],
+            'resources': tasks[task]['resources']
+        })
+
+    end = max(start_time + tasks[task]['duration'] for task, start_time, _ in schedule)
+    n_machines = len(machines_list)
+    width = min(20, max(12, end // 50))  # Limit max width
+    height = min(12, max(6, n_machines // 2))  # Limit max height
+
+    fig, ax = plt.subplots(figsize=(width, height))
+    ax.set_xlim(0, end + 1)
+    ax.set_ylim(0, n_machines + 1)
+
+    colors = plt.cm.Set3(np.linspace(0, 1, len(resource_list) + 1))
+    color_map = {r: colors[i] for i, r in enumerate(resource_list)}
+    color_map[''] = colors[-1]
+
+    for i, activity_line in enumerate(activities, start=1):
+        for activity in activity_line:
+            start_time = activity['start_time']
+            duration = activity['duration']
+            end_time = start_time + duration
+            resources = activity['resources']
+            color = color_map[resources[0] if resources else '']
+
+            # Draw the task bar
+            ax.plot([start_time, end_time], [i, i], linewidth=16, solid_capstyle='butt', color=color)
+            
+            # Draw black task separators (vertical lines)
+            ax.plot([start_time, start_time], [i - 0.2, i + 0.2], color='black', linewidth=0.5)
+            ax.plot([end_time, end_time], [i - 0.2, i + 0.2], color='black', linewidth=0.5)
+
+            # Add text
+            text_x = (start_time + end_time) / 2
+            text_y = i
+            fontsize = max(6, min(10, 120 // len(activity_line)))  # Adjust font size based on number of tasks
+            
+            # Include resource count in the text if there are multiple resources
+            display_text = activity['name']
+            if len(resources) > 1:
+                display_text += f" ({len(resources)}R)"
+            
+            mytxt = ax.text(text_x, text_y, display_text, ha='center', va='center', color='white', fontsize=fontsize)
+            mytxt.set_path_effects([patheffects.withStroke(linewidth=2, foreground='black')])
+
+    ax.set_yticks(range(1, n_machines + 1))
+    ax.set_yticklabels(machines_list)
+    ax.set_xlabel('Time')
+    ax.set_title(f"Makespan: {end}")
+    plt.grid(True, which='both', axis='x', linestyle='--', linewidth=0.5)
+
+    # Create legend for resources
+    legend_elements = [plt.Rectangle((0,0),1,1, facecolor=color_map[r], edgecolor='black', label=r)
+                       for r in resource_list]
+    legend_elements.append(plt.Rectangle((0,0),1,1, facecolor=color_map[''], edgecolor='black', label='No resource'))
+    ax.legend(handles=legend_elements, title='Resources', loc='center left', bbox_to_anchor=(1, 0.5))
+
+    plt.tight_layout()
+    plt.show()
+
 def main():
     if len(sys.argv) != 3:
         print("Usage: python script.py <input-file-name> <output-file-name>")
@@ -113,8 +183,10 @@ def main():
         run_schedule(tasks, machines_list, resource_list, 'REQUIREMENTS_FIRST')
     ])
 
-    best_makespan = results[0][0]
-    best_schedule = results[0][1]
+    best_makespan, best_schedule = results[0]
+
+    # Add this line to draw the schedule
+    #draw_schedule(tasks, machines_list, resource_list, best_schedule)
 
     with open(output_filename, 'w') as output_file:
         output_file.write(f"% Makespan: {best_makespan}\n")
