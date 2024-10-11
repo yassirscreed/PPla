@@ -114,6 +114,22 @@ def draw_schedule(problem_data, result):
     plt.tight_layout()
     plt.show()
 
+def calculate_upper_bound(problem_data):
+    machine_loads = [0] * len(problem_data['machines'])
+    resource_loads = [0] * len(problem_data['resources'])
+    
+    for test in problem_data['tests']:
+        if test['machines']:
+            min_machine_load = min(machine_loads[problem_data['machines'].index(m)] for m in test['machines'])
+        else:
+            min_machine_load = min(machine_loads)
+        machine_loads[machine_loads.index(min_machine_load)] += test['duration']
+        for r in test['resources']:
+            resource_loads[problem_data['resources'].index(r)] += test['duration']
+    
+    return max(max(machine_loads), max(resource_loads))
+
+
 
 def create_minizinc_model(problem_data):
     model = Model()
@@ -125,7 +141,8 @@ def create_minizinc_model(problem_data):
     model["R"] = len(problem_data['resources'])
     model["durations"] = [test['duration'] for test in problem_data['tests']]
 
-     # Calculate max_makespan in Python
+     # Use this function to set max_makespan
+    #max_makespan = calculate_upper_bound(problem_data)
     max_makespan = sum(model["durations"])
     model["max_makespan"] = max_makespan
     print(f"Max makespan: {max_makespan}")
@@ -136,6 +153,7 @@ def create_minizinc_model(problem_data):
         score = (test['duration'] * 10 +
                  len(test['resources']) * 10000 +
                  (len(problem_data['machines']) - len(test['machines'])))
+                # dar priori aos testes que tem menos maquinas
         priority_scores.append(score)
     
     model["priority_scores"] = priority_scores
@@ -211,7 +229,7 @@ if __name__ == "__main__":
         if not args.test:
             print(f"\nTrying solver: {solver_name}")
         instance = Instance(Solver.lookup(solver_name), model)
-        result = instance.solve(timeout=timedelta(seconds=20))
+        result = instance.solve(timeout=timedelta(seconds=60))
         
         if args.test:
             print(f"Makespan : {result['makespan']}")
@@ -225,6 +243,12 @@ if __name__ == "__main__":
         elif result.status == Status.UNSATISFIABLE:
             if not args.test:
                 print("The problem is unsatisfiable")
+            break
+        elif result.status == Status.ALL_SOLUTIONS:
+            write_output(result, problem_data, args.output_file)
+            if not args.test:
+                print(f"All solutions written to {args.output_file}")
+                draw_schedule(problem_data, result)
             break
         else:
             if not args.test:
