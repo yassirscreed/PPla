@@ -33,13 +33,8 @@ constraint forall(t in TESTS) (
 % Makespan definition
 constraint makespan = max(end_times);
 
-% Machine assignment, Olhar para esta !!!
-constraint forall(t in TESTS) (
-    if card(machines[t]) > 0 then
-        assigned_machines[t] in machines[t]
-    else
-        assigned_machines[t] in MACHINES
-    endif
+constraint forall(j in 1..N) (
+    assigned_machines[j] in machines[j]
 );
 
 % Machine capacity (using cumulative)
@@ -61,12 +56,10 @@ constraint forall(r in RESOURCES) (
 % Redundant constraint: total duration must be less than or equal to makespan * number of machines
 constraint sum(durations) <= makespan * M;
 
-
-
 % Symmetry breaking constraints
 
 % 1. Symmetry breaking for tasks sharing all their machine choices
-constraint forall(t1, t2 in TESTS where t1 < t2 /\ machines[t1] = machines[t2] /\ card(machines[t1]) > 0) (
+constraint forall(t1, t2 in TESTS where t1 < t2 /\ machines[t1] = machines[t2] /\ card(machines[t1]) < M) (
     start_times[t1] <= start_times[t2]
 );
 

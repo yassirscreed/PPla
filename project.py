@@ -45,8 +45,10 @@ def read_input(filename):
     problem_data['machines'] = sorted(problem_data['machines'])
     problem_data['resources'] = sorted(problem_data['resources'])
     
-    # Sort tests after reading input
-    problem_data['tests'] = sort_tests(problem_data['tests'])
+    # Sort tests and keep track of the original order
+    sorted_tests = sort_tests(problem_data['tests'])
+    problem_data['original_order'] = {test['name']: i for i, test in enumerate(problem_data['tests'])}
+    problem_data['tests'] = sorted_tests
     
     return problem_data
 
@@ -189,17 +191,18 @@ def create_minizinc_model(problem_data, dzn_file=None):
         
         # Set up the machines each task can run on
         machine_sets = []
+        all_machines = set(range(1, len(problem_data['machines']) + 1))
         for test in problem_data['tests']:
             if not test['machines']:
-                machine_sets.append(set())
+                machine_sets.append(all_machines)
             else:
-                machine_sets.append({problem_data['machines'].index(m) + 1 for m in test['machines']})
+                machine_sets.append({int(m[1:]) for m in test['machines']})
         model["machines"] = machine_sets
         
         # Set up the resources each task uses
         resource_sets = []
         for test in problem_data['tests']:
-            resource_sets.append({problem_data['resources'].index(r) + 1 for r in test['resources']})
+            resource_sets.append({int(r[1:]) for r in test['resources']})
         model["resources"] = resource_sets
 
     return model
@@ -207,14 +210,20 @@ def create_minizinc_model(problem_data, dzn_file=None):
 def write_output(result, problem_data, output_file):
     with open(output_file, 'w') as f:
         f.write(f"% Makespan : {result['makespan']}\n")
+        
+        # Create a mapping from sorted index to original name
+        sorted_to_original = {i: test['name'] for i, test in enumerate(problem_data['tests'])}
+        
         for m in range(1, len(problem_data['machines']) + 1):
             tasks = []
             for i, (start, machine) in enumerate(zip(result['start_times'], result['assigned_machines'])):
                 if machine == m:
+                    original_name = sorted_to_original[i]
+                    original_index = problem_data['original_order'][original_name]
                     test = problem_data['tests'][i]
                     resources = ','.join(f"'r{problem_data['resources'].index(r) + 1}'" for r in test['resources'])
                     resources_str = f",[{resources}]" if resources else ''
-                    tasks.append((start, f"('t{i+1}',{start}{resources_str})"))
+                    tasks.append((start, f"('t{original_index+1}',{start}{resources_str})"))
             if tasks:
                 sorted_tasks = [task[1] for task in sorted(tasks, key=lambda x: x[0])]
                 f.write(f"machine( 'm{m}', {len(sorted_tasks)}, [{', '.join(sorted_tasks)}])\n")
@@ -249,17 +258,18 @@ def generate_dzn_content(problem_data):
     content.append(f"durations = {durations};")
     
     machine_sets = []
+    all_machines = set(range(1, len(problem_data['machines']) + 1))
     for test in problem_data['tests']:
         if not test['machines']:
-            machine_sets.append("{}")
+            machine_sets.append(str(all_machines))
         else:
-            machine_set = "{" + ", ".join(str(problem_data['machines'].index(m) + 1) for m in test['machines']) + "}"
+            machine_set = "{" + ", ".join(str(int(m[1:])) for m in test['machines']) + "}"
             machine_sets.append(machine_set)
     content.append(f"machines = [{', '.join(machine_sets)}];")
     
     resource_sets = []
     for test in problem_data['tests']:
-        resource_set = "{" + ", ".join(str(problem_data['resources'].index(r) + 1) for r in test['resources']) + "}"
+        resource_set = "{" + ", ".join(str(int(r[1:])) for r in test['resources']) + "}"
         resource_sets.append(resource_set)
     content.append(f"resources = [{', '.join(resource_sets)}];")
     
