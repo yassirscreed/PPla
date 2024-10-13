@@ -61,10 +61,7 @@ constraint forall(r in RESOURCES) (
 % Redundant constraint: total duration must be less than or equal to makespan * number of machines
 constraint sum(durations) <= makespan * M;
 
-% Balance load across machines <- olhar para esta constraint tambem, pode tar a restringir mais resultados
-constraint forall(m in MACHINES)(
-    count(assigned_machines, m) <= (N div M) + 1  
-);
+
 
 % Symmetry breaking constraints
 

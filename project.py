@@ -58,30 +58,49 @@ def sort_tests(tests):
     # Sort by resources needed
     #return sorted(tests, key=lambda x: len(x['resources']), reverse=True)
     # Sort by number of lower number of machine options
-    #return sorted(tests, key=lambda x: (len(x['machines']) == 0, len(x['machines']), -x['duration']))
+   # return sorted(tests, key=lambda x: (len(x['machines']) == 0, len(x['machines']), -x['duration']))
 
-def draw_schedule(problem_data, result):
+def draw_schedule(problem_data, output_file):
     activities = [[] for _ in range(len(problem_data['machines']))]
-    for i, (start, machine) in enumerate(zip(result['start_times'], result['assigned_machines'])):
-        test = problem_data['tests'][i]
-        activities[machine-1].append({
-            'name': test['name'],
-            'start_time': start,
-            'duration': test['duration'],
-            'resources': test['resources']
-        })
+    
+    # Read the output file
+    with open(output_file, 'r') as f:
+        lines = f.readlines()
+    
+    # Extract makespan
+    makespan = int(lines[0].split(':')[1].strip())
+    
+    # Parse the schedule
+    for line in lines[1:]:
+        if line.startswith('machine'):
+            parts = line.split(', [')
+            machine_num = int(parts[0].split("'")[1][1:])  # Extract machine number
+            tasks = eval('[' + parts[1][:-2])  # Convert string representation of list to actual list
+            
+            for task in tasks:
+                task_name, start_time = task[:2]
+                resources = task[2] if len(task) > 2 else []
+                
+                # Find the corresponding test in problem_data
+                test = next(t for t in problem_data['tests'] if t['name'] == task_name)
+                
+                activities[machine_num-1].append({
+                    'name': task_name,
+                    'start_time': start_time,
+                    'duration': test['duration'],
+                    'resources': resources
+                })
 
-    end = result['makespan']
     n_machines = len(problem_data['machines'])
-    width = min(20, max(12, end // 50))  # Limit max width
+    width = min(20, max(12, makespan // 50))  # Limit max width
     height = min(12, max(6, n_machines // 2))  # Limit max height
 
     fig, ax = plt.subplots(figsize=(width, height))
-    ax.set_xlim(0, end + 1)
+    ax.set_xlim(0, makespan + 1)
     ax.set_ylim(0, n_machines + 1)
 
     colors = plt.cm.Set3(np.linspace(0, 1, len(problem_data['resources']) + 1))
-    color_map = {r: colors[i] for i, r in enumerate(problem_data['resources'])}
+    color_map = {f'r{i+1}': colors[i] for i in range(len(problem_data['resources']))}
     color_map[''] = colors[-1]
 
     for i, activity_line in enumerate(activities, start=1):
@@ -115,12 +134,12 @@ def draw_schedule(problem_data, result):
     ax.set_yticks(range(1, n_machines + 1))
     ax.set_yticklabels([f'M{i}' for i in range(1, n_machines + 1)])
     ax.set_xlabel('Time')
-    ax.set_title(f"Makespan: {end} ")
+    ax.set_title(f"Makespan: {makespan}")
     plt.grid(True, which='both', axis='x', linestyle='--', linewidth=0.5)
 
     # Create legend for resources
-    legend_elements = [plt.Rectangle((0,0),1,1, facecolor=color_map[r], edgecolor='black', label=r)
-                       for r in problem_data['resources']]
+    legend_elements = [plt.Rectangle((0,0),1,1, facecolor=color_map[f'r{i+1}'], edgecolor='black', label=f'r{i+1}')
+                       for i in range(len(problem_data['resources']))]
     legend_elements.append(plt.Rectangle((0,0),1,1, facecolor=color_map[''], edgecolor='black', label='No resource'))
     ax.legend(handles=legend_elements, title='Resources', loc='center left', bbox_to_anchor=(1, 0.5))
 
@@ -193,12 +212,12 @@ def write_output(result, problem_data, output_file):
             for i, (start, machine) in enumerate(zip(result['start_times'], result['assigned_machines'])):
                 if machine == m:
                     test = problem_data['tests'][i]
-                    resources = ','.join(test['resources']) if test['resources'] else ''
-                    resources_str = f",['{resources}']" if resources else ''
-                    tasks.append((start, f"('{test['name']}',{start}{resources_str})"))
+                    resources = ','.join(f"'r{problem_data['resources'].index(r) + 1}'" for r in test['resources'])
+                    resources_str = f",[{resources}]" if resources else ''
+                    tasks.append((start, f"('t{i+1}',{start}{resources_str})"))
             if tasks:
                 sorted_tasks = [task[1] for task in sorted(tasks, key=lambda x: x[0])]
-                f.write(f"machine( 'm{m}', {len(sorted_tasks)}, [{','.join(sorted_tasks)}])\n")
+                f.write(f"machine( 'm{m}', {len(sorted_tasks)}, [{', '.join(sorted_tasks)}])\n")
 
 def print_debug_info(problem_data):
     print("\nTests:")
@@ -287,7 +306,7 @@ if __name__ == "__main__":
             write_output(result, problem_data, args.output_file)
             if not args.test:
                 print(f"Solution written to {args.output_file}")
-                draw_schedule(problem_data, result)
+                draw_schedule(problem_data, args.output_file)
             break
         elif result.status == Status.UNSATISFIABLE:
             if not args.test:
@@ -297,7 +316,7 @@ if __name__ == "__main__":
             write_output(result, problem_data, args.output_file)
             if not args.test:
                 print(f"All solutions written to {args.output_file}")
-                draw_schedule(problem_data, result)
+                draw_schedule(problem_data, args.output_file)
             break
         else:
             if not args.test:
