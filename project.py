@@ -59,9 +59,9 @@ def sort_tests(tests):
     # Sort tests by resources needed and lower machine options
     #return sorted(tests, key=lambda x: (len(x['resources']), x['duration']), reverse=True)
     # Sort by descending duration
-    return sorted(tests, key=lambda x: x['duration'], reverse=True)
+    #return sorted(tests, key=lambda x: x['duration'], reverse=True)
     # Sort by resources needed
-    #return sorted(tests, key=lambda x: len(x['resources']), reverse=True)
+    return sorted(tests, key=lambda x: len(x['resources']), reverse=True)
     # Sort by number of lower number of machine options
    # return sorted(tests, key=lambda x: (len(x['machines']) == 0, len(x['machines']), -x['duration']))
 
@@ -318,7 +318,7 @@ if __name__ == "__main__":
         if not args.test:
             print(f"\nTrying solver: {solver_name}")
         instance = Instance(Solver.lookup(solver_name), model)
-        result = instance.solve(timeout=timedelta(seconds=20))
+        result = instance.solve(timeout=timedelta(seconds=300))
         
         if args.test:
             print(f"Makespan : {result['makespan']}")
