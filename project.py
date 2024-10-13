@@ -8,6 +8,8 @@ import argparse
 import os
 import sys
 
+USE_SORTING = True
+
 def read_input(filename):
     problem_data = {
         'tests': [],
@@ -45,10 +47,11 @@ def read_input(filename):
     problem_data['machines'] = sorted(problem_data['machines'])
     problem_data['resources'] = sorted(problem_data['resources'])
     
-    # Sort tests and keep track of the original order
-    sorted_tests = sort_tests(problem_data['tests'])
+    # Always keep track of the original order
     problem_data['original_order'] = {test['name']: i for i, test in enumerate(problem_data['tests'])}
-    problem_data['tests'] = sorted_tests
+    
+    if USE_SORTING:
+        problem_data['tests'] = sort_tests(problem_data['tests'])
     
     return problem_data
 
@@ -211,18 +214,23 @@ def write_output(result, problem_data, output_file):
     with open(output_file, 'w') as f:
         f.write(f"% Makespan : {result['makespan']}\n")
         
-        # Create a mapping from sorted index to original name
-        sorted_to_original = {i: test['name'] for i, test in enumerate(problem_data['tests'])}
+        if USE_SORTING:
+            # Create a mapping from sorted index to original name
+            sorted_to_original = {i: test['name'] for i, test in enumerate(problem_data['tests'])}
         
         for m in range(1, len(problem_data['machines']) + 1):
             tasks = []
             for i, (start, machine) in enumerate(zip(result['start_times'], result['assigned_machines'])):
                 if machine == m:
-                    original_name = sorted_to_original[i]
-                    original_index = problem_data['original_order'][original_name]
+                    if USE_SORTING:
+                        original_name = sorted_to_original[i]
+                        original_index = problem_data['original_order'][original_name]
+                    else:
+                        original_index = i
                     test = problem_data['tests'][i]
-                    resources = ','.join(f"'r{problem_data['resources'].index(r) + 1}'" for r in test['resources'])
-                    resources_str = f",[{resources}]" if resources else ''
+                    # Preserve the original order of resources
+                    resources = [f"'{r}'" for r in test['resources']]
+                    resources_str = f",[{','.join(resources)}]" if resources else ''
                     tasks.append((start, f"('t{original_index+1}',{start}{resources_str})"))
             if tasks:
                 sorted_tasks = [task[1] for task in sorted(tasks, key=lambda x: x[0])]
@@ -281,7 +289,10 @@ if __name__ == "__main__":
     parser.add_argument("output_file", help="Output file path", nargs='?')
     parser.add_argument("--test", action="store_true", help="Run in test mode (no plotting or debug output)")
     parser.add_argument("--dzn", action="store_true", help="Create a .dzn file for the model and exit")
+    parser.add_argument("--no-sort", action="store_true", help="Disable sorting of tests")
     args = parser.parse_args()
+
+    USE_SORTING = not args.no_sort
 
     problem_data = read_input(args.input_file)
     
