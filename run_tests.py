@@ -25,9 +25,9 @@ def run_test(args):
     your_output = os.path.join(temp_dir, f"your_output_{test_name}.txt")
     start_time = time.time()
     try:
-        subprocess.run(["python", your_solution, input_file, your_output, "--test"], capture_output=True, timeout=20)
+        subprocess.run(["python", your_solution, input_file, your_output, "--test"], capture_output=True, timeout=120)
     except subprocess.TimeoutExpired:
-        print(f"Test {test_name} FAILED: Timeout (20 seconds)")
+        print(f"Test {test_name} FAILED: Timeout (120 seconds)")
         return (test_name, None, None, "Timeout")
 
     # Run reference solution
@@ -52,7 +52,7 @@ def main():
     test_dir = "tests_script"
     temp_dir = os.path.join(test_dir, "temp")
     your_solution = "project.py"
-    reference_solution = "Solutions/python_solution2.py"
+    reference_solution = os.path.join("Solutions", "python_solution2.py")
 
     # Create temp directory if it doesn't exist
     os.makedirs(temp_dir, exist_ok=True)

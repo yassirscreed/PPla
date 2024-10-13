@@ -5,9 +5,8 @@ import matplotlib.pyplot as plt
 from matplotlib import patheffects
 import numpy as np
 import argparse
-
-p_lists = []
-p_order = []
+import os
+import sys
 
 def read_input(filename):
     problem_data = {
@@ -45,11 +44,25 @@ def read_input(filename):
 
     problem_data['machines'] = sorted(problem_data['machines'])
     problem_data['resources'] = sorted(problem_data['resources'])
+    
+    # Sort tests after reading input
+    problem_data['tests'] = sort_tests(problem_data['tests'])
+    
     return problem_data
+
+def sort_tests(tests):
+    # Sort tests by resources needed and lower machine options
+    #return sorted(tests, key=lambda x: (len(x['resources']), x['duration']), reverse=True)
+    # Sort by descending duration
+    return sorted(tests, key=lambda x: x['duration'], reverse=True)
+    # Sort by resources needed
+    #return sorted(tests, key=lambda x: len(x['resources']), reverse=True)
+    # Sort by number of lower number of machine options
+    #return sorted(tests, key=lambda x: (len(x['machines']) == 0, len(x['machines']), -x['duration']))
 
 def draw_schedule(problem_data, result):
     activities = [[] for _ in range(len(problem_data['machines']))]
-    for i, (start, machine) in enumerate(zip(result['start_times'], result['assigned_machine'])):
+    for i, (start, machine) in enumerate(zip(result['start_times'], result['assigned_machines'])):
         test = problem_data['tests'][i]
         activities[machine-1].append({
             'name': test['name'],
@@ -129,57 +142,46 @@ def calculate_upper_bound(problem_data):
     
     return max(max(machine_loads), max(resource_loads))
 
+def calculate_lower_bound(problem_data):
+    resource_loads = [sum(test['duration'] for test in problem_data['tests'] if r in test['resources']) 
+                      for r in problem_data['resources']]
+    machine_loads = [sum(test['duration'] for test in problem_data['tests'] if m in test['machines']) 
+                     for m in problem_data['machines']]
+    return max(max(resource_loads), max(machine_loads))
 
-
-def create_minizinc_model(problem_data):
+def create_minizinc_model(problem_data, dzn_file=None):
     model = Model()
     model.add_string(open("model.mzn").read())
     
-    # Set up the parameters for the model
-    model["M"] = len(problem_data['machines'])
-    model["N"] = len(problem_data['tests'])
-    model["R"] = len(problem_data['resources'])
-    model["durations"] = [test['duration'] for test in problem_data['tests']]
+    if dzn_file:
+        model.add_file(dzn_file)
+    else:
+        # Set up the parameters for the model
+        model["M"] = len(problem_data['machines'])
+        model["N"] = len(problem_data['tests'])
+        model["R"] = len(problem_data['resources'])
+        model["durations"] = [test['duration'] for test in problem_data['tests']]
 
-     # Use this function to set max_makespan
-    #max_makespan = calculate_upper_bound(problem_data)
-    max_makespan = sum(model["durations"])
-    model["max_makespan"] = max_makespan
-    print(f"Max makespan: {max_makespan}")
-
-    # Calculate priority scores in Python, requirement first
-    priority_scores = []
-    for test in problem_data['tests']:
-        score = (test['duration'] * 10 +
-                 len(test['resources']) * 10000 +
-                 (len(problem_data['machines']) - len(test['machines'])))
-                # dar priori aos testes que tem menos maquinas
-        priority_scores.append(score)
-    
-    model["priority_scores"] = priority_scores
-    p_lists.append(priority_scores)
-
-    # Calculate priority order in Python
-    priority_order = sorted(range(1, len(priority_scores) + 1), 
-                            key=lambda i: priority_scores[i-1], 
-                            reverse=True)
-    model["priority_order"] = priority_order
-    p_order.append(priority_order)
-    
-    # Set up the machines each task can run on
-    machine_sets = []
-    for test in problem_data['tests']:
-        if not test['machines']:
-            machine_sets.append(set())
-        else:
-            machine_sets.append({problem_data['machines'].index(m) + 1 for m in test['machines']})
-    model["machines"] = machine_sets
-    
-    # Set up the resources each task uses
-    resource_sets = []
-    for test in problem_data['tests']:
-        resource_sets.append({problem_data['resources'].index(r) + 1 for r in test['resources']})
-    model["resources"] = resource_sets
+        # Use this function to set max_makespan
+        upper_bound = calculate_upper_bound(problem_data)
+        lower_bound = calculate_lower_bound(problem_data)
+        model["max_makespan"] = upper_bound if upper_bound > lower_bound else round(upper_bound * 1.1)
+        model["min_makespan"] = lower_bound
+        
+        # Set up the machines each task can run on
+        machine_sets = []
+        for test in problem_data['tests']:
+            if not test['machines']:
+                machine_sets.append(set())
+            else:
+                machine_sets.append({problem_data['machines'].index(m) + 1 for m in test['machines']})
+        model["machines"] = machine_sets
+        
+        # Set up the resources each task uses
+        resource_sets = []
+        for test in problem_data['tests']:
+            resource_sets.append({problem_data['resources'].index(r) + 1 for r in test['resources']})
+        model["resources"] = resource_sets
 
     return model
 
@@ -188,7 +190,7 @@ def write_output(result, problem_data, output_file):
         f.write(f"% Makespan : {result['makespan']}\n")
         for m in range(1, len(problem_data['machines']) + 1):
             tasks = []
-            for i, (start, machine) in enumerate(zip(result['start_times'], result['assigned_machine'])):
+            for i, (start, machine) in enumerate(zip(result['start_times'], result['assigned_machines'])):
                 if machine == m:
                     test = problem_data['tests'][i]
                     resources = ','.join(test['resources']) if test['resources'] else ''
@@ -207,19 +209,66 @@ def print_debug_info(problem_data):
     print(f"\nNumber of tests: {len(problem_data['tests'])}")
     print(f"Number of machines: {len(problem_data['machines'])}")
     print(f"Number of resources: {len(problem_data['resources'])}")
-    print(f"\nPriority scores: {p_lists}")
-    print(f"\nPriority order: {p_order}")
+    
+    upper_bound = calculate_upper_bound(problem_data)
+    lower_bound = calculate_lower_bound(problem_data)
+    print(f"\nLower bound (minimum makespan): {lower_bound}")
+    print(f"Upper bound (maximum makespan): {upper_bound}")
+
+def generate_dzn_content(problem_data):
+    content = []
+    content.append(f"M = {len(problem_data['machines'])};")
+    content.append(f"N = {len(problem_data['tests'])};")
+    content.append(f"R = {len(problem_data['resources'])};")
+    
+    upper_bound = calculate_upper_bound(problem_data)
+    lower_bound = calculate_lower_bound(problem_data)
+    content.append(f"max_makespan = {upper_bound if upper_bound > lower_bound else round(upper_bound * 1.18)};")
+    content.append(f"min_makespan = {lower_bound};")
+    
+    durations = [test['duration'] for test in problem_data['tests']]
+    content.append(f"durations = {durations};")
+    
+    machine_sets = []
+    for test in problem_data['tests']:
+        if not test['machines']:
+            machine_sets.append("{}")
+        else:
+            machine_set = "{" + ", ".join(str(problem_data['machines'].index(m) + 1) for m in test['machines']) + "}"
+            machine_sets.append(machine_set)
+    content.append(f"machines = [{', '.join(machine_sets)}];")
+    
+    resource_sets = []
+    for test in problem_data['tests']:
+        resource_set = "{" + ", ".join(str(problem_data['resources'].index(r) + 1) for r in test['resources']) + "}"
+        resource_sets.append(resource_set)
+    content.append(f"resources = [{', '.join(resource_sets)}];")
+    
+    return "\n".join(content)
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Solve the scheduling problem.")
+    parser = argparse.ArgumentParser(description="Solve the scheduling problem or generate .dzn file.")
     parser.add_argument("input_file", help="Input file path")
-    parser.add_argument("output_file", help="Output file path")
+    parser.add_argument("output_file", help="Output file path", nargs='?')
     parser.add_argument("--test", action="store_true", help="Run in test mode (no plotting or debug output)")
+    parser.add_argument("--dzn", action="store_true", help="Create a .dzn file for the model and exit")
     args = parser.parse_args()
 
     problem_data = read_input(args.input_file)
-    model = create_minizinc_model(problem_data)
+    
+    if args.dzn:
+        dzn_content = generate_dzn_content(problem_data)
+        dzn_file = os.path.splitext(args.input_file)[0] + ".dzn"
+        with open(dzn_file, "w") as f:
+            f.write(dzn_content)
+        print(f"Created .dzn file: {dzn_file}")
+        sys.exit(0)  # Exit after creating the .dzn file
+    
+    if not args.output_file:
+        print("Error: output_file is required when not using --dzn flag")
+        sys.exit(1)
 
+    model = create_minizinc_model(problem_data)
 
     if not args.test:
         print_debug_info(problem_data)
@@ -229,7 +278,7 @@ if __name__ == "__main__":
         if not args.test:
             print(f"\nTrying solver: {solver_name}")
         instance = Instance(Solver.lookup(solver_name), model)
-        result = instance.solve(timeout=timedelta(seconds=60))
+        result = instance.solve(timeout=timedelta(seconds=20))
         
         if args.test:
             print(f"Makespan : {result['makespan']}")

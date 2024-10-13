@@ -1,123 +1,129 @@
 include "globals.mzn";
 
-% PARAMETERS
+% Parameters
 int: M;  % Number of machines
 int: N;  % Number of tests
 int: R;  % Number of resources
 
-array[1..N] of int: durations;
-array[1..N] of set of 1..M: machines;
-array[1..N] of set of 1..R: resources;
+int: max_makespan;  % Maximum makespan (upper bound)
+int: min_makespan;  % Minimum makespan (lower bound)
 
-int: max_makespan;
+set of int: TESTS = 1..N;
+set of int: MACHINES = 1..M;
+set of int: RESOURCES = 1..R;
 
-array[1..N] of int: priority_scores;
-array[1..N] of int: priority_order;
+array[TESTS] of int: durations;
+array[TESTS] of set of MACHINES: machines;
+array[TESTS] of set of RESOURCES: resources;
 
-% VARIABLES
-array[1..N] of var 0..max_makespan: start_times;
-array[1..N] of var 1..M: assigned_machine;
+% Decision Variables
+array[TESTS] of var 0..max_makespan: start_times;
+array[TESTS] of var MACHINES: assigned_machines;
+var min_makespan..max_makespan: makespan;
 
-var 0..max_makespan: makespan;
+% Auxiliary Variables
+array[TESTS] of var 0..max_makespan: end_times;
 
-% DERIVED VARIABLES
-array[1..N] of var 0..max_makespan: end_times;
-constraint forall(t in 1..N) (end_times[t] = start_times[t] + durations[t]);
-
-
-% Custom disjunctive predicate
-predicate custom_disjunctive(array[int] of var bool: b,
-                             array[int] of var int: s,
-                             array[int] of int: d) =
-    forall (i,j in index_set(s) where i<j) (
-        not b[i] \/ not b[j] \/
-        s[i] + d[i] <= s[j] \/
-        s[j] + d[j] <= s[i]
-    );
-
-% CONSTRAINTS
-
-% Assign machines considering machine options
-constraint
-    forall(t in 1..N) (
-        if card(machines[t]) > 0 then
-            assigned_machine[t] in machines[t]
-        else
-            assigned_machine[t] in 1..M
-        endif
-    );
+% Constraints
+% End times calculation
+constraint forall(t in TESTS) (
+    end_times[t] = start_times[t] + durations[t]
+);
 
 % Makespan definition
 constraint makespan = max(end_times);
 
-% No overlapping on the same machine (using custom_disjunctive)
-constraint
-    forall(m in 1..M) (
-        let {
-            array[1..N] of var bool: on_machine = [assigned_machine[t] = m | t in 1..N]
-        } in
-        custom_disjunctive(on_machine, start_times, durations)
-    );
+% Machine assignment, Olhar para esta !!!
+constraint forall(t in TESTS) (
+    if card(machines[t]) > 0 then
+        assigned_machines[t] in machines[t]
+    else
+        assigned_machines[t] in MACHINES
+    endif
+);
 
-% No overlap of tasks using the same resource across all machines
-constraint
-    forall(r in 1..R) (
-        let {
-            array[1..N] of var bool: uses_resource = [r in resources[t] | t in 1..N]
-        } in
-        custom_disjunctive(uses_resource, start_times, durations)
-    );
+% Machine capacity (using cumulative)
+constraint forall(m in MACHINES) (
+    cumulative(start_times, 
+               [durations[t] | t in TESTS], 
+               [bool2int(assigned_machines[t] = m) | t in TESTS],
+               1)
+);
 
-% Redundant constraint: cumulative for better machine utilization
-constraint
-    cumulative(start_times, durations, [1 | i in 1..N], M);
+% Resource constraints (using cumulative)
+constraint forall(r in RESOURCES) (
+    cumulative(start_times,
+               durations,
+               [bool2int(r in resources[t]) | t in TESTS],
+               1)
+);
 
-% Symmetry breaking: order tasks on the same machine
-constraint
-    forall(m in 1..M) (
-        forall(t1, t2 in 1..N where t1 < t2 /\ card(machines[t1]) = 1 /\ card(machines[t2]) = 1 /\ machines[t1] = machines[t2]) (
-            assigned_machine[t1] = m /\ assigned_machine[t2] = m -> start_times[t1] < start_times[t2]
-        )
-    );
+% Redundant constraint: total duration must be less than or equal to makespan * number of machines
+constraint sum(durations) <= makespan * M;
 
-% Symmetry breaking for tasks sharing all their machine choices
- constraint forall(t1, t2 in 1..N where t1 < t2 /\ machines[t1] = machines[t2] /\ card(machines[t1]) > 0) (
-     start_times[t1] <= start_times[t2]
- );
+% Balance load across machines <- olhar para esta constraint tambem, pode tar a restringir mais resultados
+constraint forall(m in MACHINES)(
+    count(assigned_machines, m) <= (N div M) + 1  
+);
 
- % Symmetry breaking for tasks with the same duration and overlapping machine choices
- constraint forall(t1, t2 in 1..N where t1 < t2 /\ durations[t1] = durations[t2] /\ card(machines[t1] intersect machines[t2]) > 0)(
-    lex_less([start_times[t1], assigned_machine[t1]], [start_times[t2], assigned_machine[t2]])
- );
+% Symmetry breaking constraints
 
+% 1. Symmetry breaking for tasks sharing all their machine choices
+constraint forall(t1, t2 in TESTS where t1 < t2 /\ machines[t1] = machines[t2] /\ card(machines[t1]) > 0) (
+    start_times[t1] <= start_times[t2]
+);
 
+% 2. Symmetry breaking for tasks with the same duration and overlapping machine choices
+constraint forall(t1, t2 in TESTS where t1 < t2 /\ durations[t1] = durations[t2] /\ card(machines[t1] intersect machines[t2]) > 0) (
+    lex_lesseq([start_times[t1], assigned_machines[t1]], [start_times[t2], assigned_machines[t2]])
+);
 
-% Lower bound on makespan
-constraint
-    makespan >= max([sum([durations[t] | t in 1..N where r in resources[t]]) | r in 1..R] ++ 
-                    [sum([durations[t] | t in 1..N where m in machines[t]]) | m in 1..M]);
+% 3. Symmetry breaking: order tasks on the same machine (modified for our model)
+constraint forall(m in MACHINES) (
+    forall(t1, t2 in TESTS where t1 < t2 /\ card(machines[t1]) = 1 /\ card(machines[t2]) = 1 /\ machines[t1] = machines[t2]) (
+        (assigned_machines[t1] = m /\ assigned_machines[t2] = m) -> start_times[t1] < start_times[t2]
+    )
+);
 
+% Additional redundant constraints
 
-% Custom search annotation based on priority order
-ann: priority_search(array[int] of var int: x) = 
-    let {
-        array[int] of var int: sorted_x = 
-            [x[priority_order[i]] | i in 1..N where priority_order[i] in index_set(x)]
-    } in
-    int_search(sorted_x, dom_w_deg, indomain_min);
+% 4. Ensure all tasks start before the makespan minus their duration
+constraint forall(t in TESTS) (
+    start_times[t] <= makespan - durations[t]
+);
 
-% SEARCH STRATEGY
+% 5. Ensure the sum of all task durations is at least equal to the makespan
+constraint sum(durations) >= makespan;
+
+% 6. Ensure the maximum end time of any task is equal to the makespan
+constraint max(end_times) = makespan;
+
+% 7. Ensure the minimum start time plus the minimum duration is less than or equal to the makespan
+constraint min(start_times) + min(durations) <= makespan;
+
+% Search annotation
 solve :: seq_search([
-    priority_search(start_times),
-    priority_search([assigned_machine[t] | t in 1..N])
+    int_search(assigned_machines, first_fail, indomain_min),
+    int_search(start_times, smallest, indomain_split),
+    int_search([makespan], input_order, indomain_min)
 ])
-     :: relax_and_reconstruct(start_times ++ [assigned_machine[t] | t in 1..N], 30)
-     minimize makespan;
+:: relax_and_reconstruct(start_times ++ assigned_machines, 70)
+minimize makespan;
 
-% OUTPUT
+% Output
 output [
-  "makespan = ", show(makespan), ";\n",
-  "priority_order = ", show(priority_order), ";\n",
-  "start_times = ", show(start_times), ";\n",
-  "assigned_machine = ", show(assigned_machine), ";\n"
+    "% Makespan : \(makespan)\n"
+] ++ [
+    "machine( 'm\(m)', \(count(assigned_machines, m)), [" 
+   ++ join(", ", [ 
+        "('t\(t)',\(start_times[t])" 
+        ++ if card(resources[t]) > 0 then 
+            ",['" ++ join("','", [show(r) | r in resources[t]]) ++ "']" 
+        else 
+            "" 
+        endif
+        | t in TESTS where fix(assigned_machines[t]) = m
+    ]) 
+    ++ "])\n"
+    | m in MACHINES
 ];

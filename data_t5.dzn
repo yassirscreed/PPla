@@ -1,9 +1,0 @@
-N = 5;  % Number of tests
-M = 2;  % Number of machines
-R = 1;  % Number of resources
-
-durations = [3, 2, 4, 1, 2];
-
-machines = [{}, {}, {}, {1}, {2}];
-
-resources = [{}, {1}, {1}, {}, {}];
