@@ -24,6 +24,9 @@ var min_makespan..max_makespan: makespan;
 % Auxiliary Variables
 array[TESTS] of var 0..max_makespan: end_times;
 
+array[MACHINES] of var 0..max_makespan: machine_end_times;
+array[RESOURCES] of var 0..max_makespan: resource_end_times;
+
 % Constraints
 % End times calculation
 constraint forall(t in TESTS) (
@@ -44,7 +47,6 @@ constraint forall(m in MACHINES) (
                [bool2int(assigned_machines[t] = m) | t in TESTS],
                1)
 );
-
 % Resource constraints (using cumulative)
 constraint forall(r in RESOURCES) (
     cumulative(start_times,
@@ -53,26 +55,28 @@ constraint forall(r in RESOURCES) (
                1)
 );
 
+% Machine end times
+constraint forall(m in MACHINES) (
+    machine_end_times[m] = max([end_times[t] | t in TESTS where assigned_machines[t] = m] ++ [0])
+);
+
+% Resource end times
+constraint forall(r in RESOURCES) (
+    resource_end_times[r] = max([end_times[t] | t in TESTS where r in resources[t]] ++ [0])
+);
+
+% Makespan constraints
+constraint makespan = max(machine_end_times);
+constraint makespan = max(resource_end_times);
+
 % Redundant constraint: total duration must be less than or equal to makespan * number of machines
 constraint sum(durations) <= makespan * M;
 
 % Symmetry breaking constraints
 
-% 1. Symmetry breaking for tasks sharing all their machine choices
-constraint forall(t1, t2 in TESTS where t1 < t2 /\ machines[t1] = machines[t2] /\ card(machines[t1]) < M) (
-    start_times[t1] <= start_times[t2]
-);
-
-% 2. Symmetry breaking for tasks with the same duration and overlapping machine choices
-constraint forall(t1, t2 in TESTS where t1 < t2 /\ durations[t1] = durations[t2] /\ card(machines[t1] intersect machines[t2]) > 0) (
-    lex_lesseq([start_times[t1], assigned_machines[t1]], [start_times[t2], assigned_machines[t2]])
-);
-
-% 3. Symmetry breaking: order tasks on the same machine (modified for our model)
-constraint forall(m in MACHINES) (
-    forall(t1, t2 in TESTS where t1 < t2 /\ card(machines[t1]) = 1 /\ card(machines[t2]) = 1 /\ machines[t1] = machines[t2]) (
-        (assigned_machines[t1] = m /\ assigned_machines[t2] = m) -> start_times[t1] < start_times[t2]
-    )
+constraint symmetry_breaking_constraint(
+    lex_lesseq([start_times[i] | i in TESTS where card(machines[i]) = M],
+               [start_times[j] | j in TESTS where card(machines[j]) = M])
 );
 
 % Additional redundant constraints
@@ -82,23 +86,18 @@ constraint forall(t in TESTS) (
     start_times[t] <= makespan - durations[t]
 );
 
-% 5. Ensure the sum of all task durations is at least equal to the makespan
-constraint sum(durations) >= makespan;
-
-% 6. Ensure the maximum end time of any task is equal to the makespan
+% Ensure the maximum end time of any task is equal to the makespan
 constraint max(end_times) = makespan;
 
-% 7. Ensure the minimum start time plus the minimum duration is less than or equal to the makespan
-constraint min(start_times) + min(durations) <= makespan;
 
 % Search annotation
 solve :: seq_search([
-    int_search(assigned_machines, first_fail, indomain_min),
+    int_search(assigned_machines, dom_w_deg, indomain_random),
     int_search(start_times, smallest, indomain_split),
     int_search([makespan], input_order, indomain_min)
 ])
-:: relax_and_reconstruct(start_times ++ assigned_machines, 70)
-minimize makespan;
+:: restart_luby(100)
+satisfy;
 
 % Output
 output [

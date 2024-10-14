@@ -59,9 +59,9 @@ def sort_tests(tests):
     # Sort tests by resources needed and lower machine options
     #return sorted(tests, key=lambda x: (len(x['resources']), x['duration']), reverse=True)
     # Sort by descending duration
-    #return sorted(tests, key=lambda x: x['duration'], reverse=True)
+    return sorted(tests, key=lambda x: x['duration'], reverse=True)
     # Sort by resources needed
-    return sorted(tests, key=lambda x: len(x['resources']), reverse=True)
+    #    return sorted(tests, key=lambda x: len(x['resources']), reverse=True)
     # Sort by number of lower number of machine options
    # return sorted(tests, key=lambda x: (len(x['machines']) == 0, len(x['machines']), -x['duration']))
 
@@ -173,6 +173,56 @@ def calculate_lower_bound(problem_data):
                      for m in problem_data['machines']]
     return max(max(resource_loads), max(machine_loads))
 
+def binary_search_optimization(model, problem_data, solver_name, timeout=300):
+    solver = Solver.lookup(solver_name)
+    instance = Instance(solver, model)
+    
+    lower_bound = calculate_lower_bound(problem_data)
+    upper_bound = calculate_upper_bound(problem_data)
+    
+    # Add extra 10% to upper bound if lower bound equals upper bound initially
+    if lower_bound == upper_bound:
+        upper_bound = int(upper_bound * 1.1)
+    
+    best_solution = None
+    best_makespan = upper_bound
+    
+    print(f"Initial lower bound: {lower_bound}")
+    print(f"Initial upper bound: {upper_bound}")
+    
+    iteration = 0
+    while lower_bound <= upper_bound:
+        iteration += 1
+        current_makespan = (lower_bound + upper_bound) // 2
+        
+        # Create a new branch of the model for this iteration
+        with instance.branch() as child:
+            # Assign the new max_makespan
+            child["max_makespan"] = current_makespan
+            
+            print(f"\nIteration {iteration}:")
+            print(f"  Current makespan: {current_makespan}")
+            
+            result = child.solve(timeout=timedelta(seconds=timeout))
+            
+            print(f"  Solver status: {result.status}")
+            
+            if result.status == Status.SATISFIED or result.status == Status.ALL_SOLUTIONS:
+                best_solution = result
+                best_makespan = result["makespan"]
+                upper_bound = best_makespan - 1
+                print(f"  Found solution with makespan: {best_makespan}")
+                print(f"  New upper bound: {upper_bound}")
+            elif result.status == Status.UNSATISFIABLE:
+                lower_bound = current_makespan + 1
+                print(f"  No solution found. New lower bound: {lower_bound}")
+            else:
+                print(f"  Search stopped due to {result.status}")
+                break
+    
+    print(f"\nFinal best makespan: {best_makespan}")
+    return best_solution
+
 def create_minizinc_model(problem_data, dzn_file=None):
     model = Model()
     model.add_string(open("model.mzn").read())
@@ -186,10 +236,7 @@ def create_minizinc_model(problem_data, dzn_file=None):
         model["R"] = len(problem_data['resources'])
         model["durations"] = [test['duration'] for test in problem_data['tests']]
 
-        # Use this function to set max_makespan
-        upper_bound = calculate_upper_bound(problem_data)
         lower_bound = calculate_lower_bound(problem_data)
-        model["max_makespan"] = upper_bound if upper_bound > lower_bound else round(upper_bound * 1.1)
         model["min_makespan"] = lower_bound
         
         # Set up the machines each task can run on
@@ -317,32 +364,22 @@ if __name__ == "__main__":
     for solver_name in solvers:
         if not args.test:
             print(f"\nTrying solver: {solver_name}")
-        instance = Instance(Solver.lookup(solver_name), model)
-        result = instance.solve(timeout=timedelta(seconds=300))
         
-        if args.test:
-            print(f"Makespan : {result['makespan']}")
+        result = binary_search_optimization(model, problem_data, solver_name, timeout=300)
         
-        if result.status == Status.OPTIMAL_SOLUTION or result.status == Status.SATISFIED:
+        if result:
+            if args.test:
+                print(f"Makespan : {result['makespan']}")
+            
             write_output(result, problem_data, args.output_file)
             if not args.test:
                 print(f"Solution written to {args.output_file}")
                 draw_schedule(problem_data, args.output_file)
             break
-        elif result.status == Status.UNSATISFIABLE:
-            if not args.test:
-                print("The problem is unsatisfiable")
-            break
-        elif result.status == Status.ALL_SOLUTIONS:
-            write_output(result, problem_data, args.output_file)
-            if not args.test:
-                print(f"All solutions written to {args.output_file}")
-                draw_schedule(problem_data, args.output_file)
-            break
         else:
             if not args.test:
-                print(f"Solving process ended with status: {result.status}")
+                print(f"Failed to find a solution with {solver_name}")
     
-    if result.status not in [Status.OPTIMAL_SOLUTION, Status.SATISFIED, Status.UNSATISFIABLE]:
+    if not result:
         if not args.test:
             print("Failed to find a solution with any solver.")
