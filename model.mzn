@@ -93,7 +93,7 @@ solve %:: seq_search([
   %  int_search(start_times, smallest, indomain_min),
  %   int_search([makespan], input_order, indomain_min)
 %])
-:: int_search(start_times, smallest, indomain_min)
+%:: int_search(start_times, smallest, indomain_min)
 satisfy;
 
 % Output
