@@ -52,6 +52,9 @@ def read_input(filename):
     
     if USE_SORTING:
         problem_data['tests'] = sort_tests(problem_data['tests'])
+
+    # Run this function with your problem_data
+    #debug_bound_calculations(problem_data)
     
     return problem_data
 
@@ -151,38 +154,59 @@ def draw_schedule(problem_data, output_file):
     plt.tight_layout()
     plt.show()
 
-def calculate_upper_bound(problem_data):
+def calculate_bounds(problem_data):
+    total_duration = sum(test['duration'] for test in problem_data['tests'])
+    avg_load = total_duration / len(problem_data['machines'])
+    
+    # Initialize machine loads
     machine_loads = [0] * len(problem_data['machines'])
+    
+    # Initialize resource loads
     resource_loads = [0] * len(problem_data['resources'])
     
+    # Calculate tight lower bound
+    tight_lower_bound = 0
     for test in problem_data['tests']:
-        if test['machines']:
-            min_machine_load = min(machine_loads[problem_data['machines'].index(m)] for m in test['machines'])
-        else:
-            min_machine_load = min(machine_loads)
-        machine_loads[machine_loads.index(min_machine_load)] += test['duration']
+        # Update resource loads
         for r in test['resources']:
-            resource_loads[problem_data['resources'].index(r)] += test['duration']
+            resource_loads[int(r[1:])-1] += test['duration']
+        
+        # Find minimum load machine among available machines
+        if test['machines']:
+            available_machines = [int(m[1:])-1 for m in test['machines']]
+            min_load = min(machine_loads[m] for m in available_machines)
+            min_load_machine = available_machines[argmin([machine_loads[m] for m in available_machines])]
+        else:
+            min_load = min(machine_loads)
+            min_load_machine = machine_loads.index(min_load)
+        
+        # Update machine load
+        machine_loads[min_load_machine] += test['duration']
+        
+        # Update tight lower bound
+        tight_lower_bound = max(tight_lower_bound, min_load + test['duration'])
     
-    return max(max(machine_loads), max(resource_loads))
+    # Calculate loose upper bound
+    loose_upper_bound = max(max(machine_loads), max(resource_loads) if resource_loads else 0)
+    
+    # Calculate final bounds
+    lower_bound = max(tight_lower_bound, max(resource_loads) if resource_loads else 0, avg_load)
+    upper_bound = loose_upper_bound
+    
+    return lower_bound, upper_bound
 
-def calculate_lower_bound(problem_data):
-    resource_loads = [sum(test['duration'] for test in problem_data['tests'] if r in test['resources']) 
-                      for r in problem_data['resources']]
-    machine_loads = [sum(test['duration'] for test in problem_data['tests'] if m in test['machines']) 
-                     for m in problem_data['machines']]
-    return max(max(resource_loads), max(machine_loads))
+def argmin(lst):
+    return min(range(len(lst)), key=lst.__getitem__)
 
 def binary_search_optimization(model, problem_data, solver_name, timeout=300):
     solver = Solver.lookup(solver_name)
     instance = Instance(solver, model)
     
-    lower_bound = calculate_lower_bound(problem_data)
-    upper_bound = calculate_upper_bound(problem_data)
+    lower_bound, upper_bound = calculate_bounds(problem_data)
     
-    # Add extra 10% to upper bound if lower bound equals upper bound initially
-    if lower_bound == upper_bound:
-        upper_bound = int(upper_bound * 1.1)
+    # Add extra 18% to upper bound if lower bound equals or exceeds upper bound initially
+    if lower_bound >= upper_bound:
+        upper_bound = int(upper_bound * 1.25)
     
     best_solution = None
     best_makespan = upper_bound
@@ -193,7 +217,14 @@ def binary_search_optimization(model, problem_data, solver_name, timeout=300):
     iteration = 0
     while lower_bound <= upper_bound:
         iteration += 1
-        current_makespan = (lower_bound + upper_bound) // 2
+        
+        # Dynamic makespan selection
+        if iteration == 1:
+            # Start with the upper bound for the first iteration
+            current_makespan = upper_bound
+        else:
+            # Use exponential back-off strategy
+            current_makespan = max(lower_bound, min(upper_bound, int(lower_bound * (1.5 ** (iteration - 1)))))
         
         # Create a new branch of the model for this iteration
         with instance.branch() as child:
@@ -206,7 +237,8 @@ def binary_search_optimization(model, problem_data, solver_name, timeout=300):
             result = child.solve(timeout=timedelta(seconds=timeout))
             
             print(f"  Solver status: {result.status}")
-            
+            print(f"  Statistics: {result.statistics}")
+
             if result.status == Status.SATISFIED or result.status == Status.ALL_SOLUTIONS:
                 best_solution = result
                 best_makespan = result["makespan"]
@@ -216,6 +248,12 @@ def binary_search_optimization(model, problem_data, solver_name, timeout=300):
             elif result.status == Status.UNSATISFIABLE:
                 lower_bound = current_makespan + 1
                 print(f"  No solution found. New lower bound: {lower_bound}")
+            elif result.status == Status.OPTIMAL_SOLUTION:
+                best_solution = result
+                best_makespan = result["makespan"]
+                upper_bound = best_makespan - 1
+                print(f"  Found optimal solution with makespan: {best_makespan}")
+                return best_solution
             else:
                 print(f"  Search stopped due to {result.status}")
                 break
@@ -236,7 +274,7 @@ def create_minizinc_model(problem_data, dzn_file=None):
         model["R"] = len(problem_data['resources'])
         model["durations"] = [test['duration'] for test in problem_data['tests']]
 
-        lower_bound = calculate_lower_bound(problem_data)
+        lower_bound, _ = calculate_bounds(problem_data)
         model["min_makespan"] = lower_bound
         
         # Set up the machines each task can run on
@@ -293,10 +331,9 @@ def print_debug_info(problem_data):
     print(f"Number of machines: {len(problem_data['machines'])}")
     print(f"Number of resources: {len(problem_data['resources'])}")
     
-    upper_bound = calculate_upper_bound(problem_data)
-    lower_bound = calculate_lower_bound(problem_data)
+    lower_bound, upper_bound = calculate_bounds(problem_data)
     print(f"\nLower bound (minimum makespan): {lower_bound}")
-    print(f"Upper bound (maximum makespan): {upper_bound}")
+    print(f"Upper bound (maximum makespan): {upper_bound if upper_bound > lower_bound else int(upper_bound * 1.25)}")
 
 def generate_dzn_content(problem_data):
     content = []
@@ -304,9 +341,8 @@ def generate_dzn_content(problem_data):
     content.append(f"N = {len(problem_data['tests'])};")
     content.append(f"R = {len(problem_data['resources'])};")
     
-    upper_bound = calculate_upper_bound(problem_data)
-    lower_bound = calculate_lower_bound(problem_data)
-    content.append(f"max_makespan = {upper_bound if upper_bound > lower_bound else round(upper_bound * 1.18)};")
+    lower_bound, upper_bound = calculate_bounds(problem_data)
+    content.append(f"max_makespan = {upper_bound if upper_bound > lower_bound else int(upper_bound * 1.25)};")
     content.append(f"min_makespan = {lower_bound};")
     
     durations = [test['duration'] for test in problem_data['tests']]

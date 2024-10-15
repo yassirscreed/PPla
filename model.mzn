@@ -27,6 +27,7 @@ array[TESTS] of var 0..max_makespan: end_times;
 array[MACHINES] of var 0..max_makespan: machine_end_times;
 array[RESOURCES] of var 0..max_makespan: resource_end_times;
 
+
 % Constraints
 % End times calculation
 constraint forall(t in TESTS) (
@@ -47,6 +48,7 @@ constraint forall(m in MACHINES) (
                [bool2int(assigned_machines[t] = m) | t in TESTS],
                1)
 );
+
 % Resource constraints (using cumulative)
 constraint forall(r in RESOURCES) (
     cumulative(start_times,
@@ -72,11 +74,19 @@ constraint makespan = max(resource_end_times);
 % Redundant constraint: total duration must be less than or equal to makespan * number of machines
 constraint sum(durations) <= makespan * M;
 
+% Lower bound constraint
+constraint makespan >= max(resource_end_times);
+constraint makespan >= sum(durations) div M;
+
 % Symmetry breaking constraints
 
 constraint symmetry_breaking_constraint(
     lex_lesseq([start_times[i] | i in TESTS where card(machines[i]) = M],
                [start_times[j] | j in TESTS where card(machines[j]) = M])
+);
+
+constraint forall(i, j in TESTS where i < j /\ resources[i] = resources[j] /\ durations[i] = durations[j]) (
+  start_times[i] <= start_times[j]
 );
 
 % Additional redundant constraints
@@ -91,12 +101,12 @@ constraint max(end_times) = makespan;
 
 
 % Search annotation
-solve :: seq_search([
-    int_search(assigned_machines, dom_w_deg, indomain_random),
-    int_search(start_times, smallest, indomain_split),
-    int_search([makespan], input_order, indomain_min)
-])
-:: restart_luby(100)
+solve %:: seq_search([
+ % int_search(assigned_machines, first_fail, indomain_min),
+ % int_search(start_times, smallest, indomain_split),
+%  int_search([makespan], input_order, indomain_min)
+%])
+%:: restart_linear(1000)
 satisfy;
 
 % Output
