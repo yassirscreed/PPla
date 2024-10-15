@@ -24,9 +24,6 @@ var min_makespan..max_makespan: makespan;
 % Auxiliary Variables
 array[TESTS] of var 0..max_makespan: end_times;
 
-array[MACHINES] of var 0..max_makespan: machine_end_times;
-array[RESOURCES] of var 0..max_makespan: resource_end_times;
-
 
 % Constraints
 % End times calculation
@@ -49,6 +46,7 @@ constraint forall(m in MACHINES) (
                1)
 );
 
+
 % Resource constraints (using cumulative)
 constraint forall(r in RESOURCES) (
     cumulative(start_times,
@@ -57,25 +55,14 @@ constraint forall(r in RESOURCES) (
                1)
 );
 
-% Machine end times
-constraint forall(m in MACHINES) (
-    machine_end_times[m] = max([end_times[t] | t in TESTS where assigned_machines[t] = m] ++ [0])
-);
 
-% Resource end times
-constraint forall(r in RESOURCES) (
-    resource_end_times[r] = max([end_times[t] | t in TESTS where r in resources[t]] ++ [0])
-);
-
-% Makespan constraints
-constraint makespan = max(machine_end_times);
-constraint makespan = max(resource_end_times);
+% Makespan constraint
+constraint makespan = max(end_times);
 
 % Redundant constraint: total duration must be less than or equal to makespan * number of machines
 constraint sum(durations) <= makespan * M;
 
 % Lower bound constraint
-constraint makespan >= max(resource_end_times);
 constraint makespan >= sum(durations) div M;
 
 % Symmetry breaking constraints
@@ -102,11 +89,11 @@ constraint max(end_times) = makespan;
 
 % Search annotation
 solve %:: seq_search([
- % int_search(assigned_machines, first_fail, indomain_min),
- % int_search(start_times, smallest, indomain_split),
-%  int_search([makespan], input_order, indomain_min)
+   % int_search(assigned_machines, first_fail, indomain_random),
+  %  int_search(start_times, smallest, indomain_min),
+ %   int_search([makespan], input_order, indomain_min)
 %])
-%:: restart_linear(1000)
+:: int_search(start_times, smallest, indomain_min)
 satisfy;
 
 % Output

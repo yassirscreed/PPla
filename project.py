@@ -7,6 +7,7 @@ import numpy as np
 import argparse
 import os
 import sys
+import time
 
 USE_SORTING = True
 
@@ -64,9 +65,11 @@ def sort_tests(tests):
     # Sort by descending duration
     return sorted(tests, key=lambda x: x['duration'], reverse=True)
     # Sort by resources needed
-    #    return sorted(tests, key=lambda x: len(x['resources']), reverse=True)
+    #return sorted(tests, key=lambda x: len(x['resources']), reverse=True)
+    # Sort by number of lower number of machine options and lower number of resource options    
+    #return sorted(tests, key=lambda x: (len(x['machines']) == 0 and len(x['resources']) == 0, -len(x['machines']), -len(x['resources'])))
     # Sort by number of lower number of machine options
-   # return sorted(tests, key=lambda x: (len(x['machines']) == 0, len(x['machines']), -x['duration']))
+    #return sorted(tests, key=lambda x: (len(x['machines']) == 0, len(x['machines']), -x['duration']))
 
 def draw_schedule(problem_data, output_file):
     activities = [[] for _ in range(len(problem_data['machines']))]
@@ -154,6 +157,25 @@ def draw_schedule(problem_data, output_file):
     plt.tight_layout()
     plt.show()
 
+
+def calculate_end_times(result, problem_data):
+    machine_end_times = [0] * len(problem_data['machines'])
+    resource_end_times = [0] * len(problem_data['resources'])
+
+    for t in range(len(problem_data['tests'])):
+        end_time = result['start_times'][t] + problem_data['tests'][t]['duration']
+        
+        # Update machine end times
+        machine = result['assigned_machines'][t] - 1  # Adjust for 0-based indexing
+        machine_end_times[machine] = max(machine_end_times[machine], end_time)
+        
+        # Update resource end times
+        for r in problem_data['tests'][t]['resources']:
+            resource = int(r[1:]) - 1  # Convert 'r1' to 0, 'r2' to 1, etc.
+            resource_end_times[resource] = max(resource_end_times[resource], end_time)
+
+    return max(machine_end_times), max(resource_end_times)
+
 def calculate_bounds(problem_data):
     total_duration = sum(test['duration'] for test in problem_data['tests'])
     avg_load = total_duration / len(problem_data['machines'])
@@ -203,6 +225,7 @@ def binary_search_optimization(model, problem_data, solver_name, timeout=300):
     instance = Instance(solver, model)
     
     lower_bound, upper_bound = calculate_bounds(problem_data)
+     
     
     # Add extra 18% to upper bound if lower bound equals or exceeds upper bound initially
     if lower_bound >= upper_bound:
@@ -215,6 +238,7 @@ def binary_search_optimization(model, problem_data, solver_name, timeout=300):
     print(f"Initial upper bound: {upper_bound}")
     
     iteration = 0
+    start_time = time.time()
     while lower_bound <= upper_bound:
         iteration += 1
         
@@ -234,7 +258,8 @@ def binary_search_optimization(model, problem_data, solver_name, timeout=300):
             print(f"\nIteration {iteration}:")
             print(f"  Current makespan: {current_makespan}")
             
-            result = child.solve(timeout=timedelta(seconds=timeout))
+            remaining_time = max(0, timeout - (time.time() - start_time))
+            result = child.solve(timeout=timedelta(seconds=remaining_time))
             
             print(f"  Solver status: {result.status}")
             print(f"  Statistics: {result.statistics}")
@@ -242,8 +267,17 @@ def binary_search_optimization(model, problem_data, solver_name, timeout=300):
             if result.status == Status.SATISFIED or result.status == Status.ALL_SOLUTIONS:
                 best_solution = result
                 best_makespan = result["makespan"]
+
+                # Calculate end times
+                machine_makespan, resource_makespan = calculate_end_times(result, problem_data)
+                
+                # Update the makespan if necessary
+                best_makespan = max(best_makespan, machine_makespan, resource_makespan)
+
                 upper_bound = best_makespan - 1
                 print(f"  Found solution with makespan: {best_makespan}")
+                print(f"  Machine makespan: {machine_makespan}")
+                print(f"  Resource makespan: {resource_makespan}")
                 print(f"  New upper bound: {upper_bound}")
             elif result.status == Status.UNSATISFIABLE:
                 lower_bound = current_makespan + 1
@@ -253,12 +287,20 @@ def binary_search_optimization(model, problem_data, solver_name, timeout=300):
                 best_makespan = result["makespan"]
                 upper_bound = best_makespan - 1
                 print(f"  Found optimal solution with makespan: {best_makespan}")
+                solve_time = time.time() - start_time
+                print(f"  Time taken to solve: {solve_time:.2f} seconds")
                 return best_solution
             else:
                 print(f"  Search stopped due to {result.status}")
                 break
+        
+        if time.time() - start_time > timeout:
+            print(f"Timeout reached after {timeout} seconds")
+            break
     
+    solve_time = time.time() - start_time
     print(f"\nFinal best makespan: {best_makespan}")
+    print(f"Total time taken: {solve_time:.2f} seconds")
     return best_solution
 
 def create_minizinc_model(problem_data, dzn_file=None):
