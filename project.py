@@ -28,6 +28,9 @@ def read_input(filename):
             if line.startswith('% Number of machines'):
                 num_machines = int(line.split(':')[1].strip())
                 problem_data['machines'] = set(f'm{i}' for i in range(1, num_machines + 1))
+            elif line.startswith('% Number of resources'):
+                num_resources = int(line.split(':')[1].strip())
+                problem_data['resources'] = set(f'r{i}' for i in range(1, num_resources + 1))
             elif line.startswith('test('):
                 match = pattern.match(line.strip())
                 if match:
@@ -157,7 +160,6 @@ def draw_schedule(problem_data, output_file):
     plt.tight_layout()
     plt.show()
 
-
 def calculate_end_times(result, problem_data):
     machine_end_times = [0] * len(problem_data['machines'])
     resource_end_times = [0] * len(problem_data['resources'])
@@ -184,14 +186,19 @@ def calculate_bounds(problem_data):
     machine_loads = [0] * len(problem_data['machines'])
     
     # Initialize resource loads
-    resource_loads = [0] * len(problem_data['resources'])
+    max_resource_id = max((int(r[1:]) for test in problem_data['tests'] for r in test['resources']), default=0)
+    resource_loads = [0] * max(len(problem_data['resources']), max_resource_id)
     
     # Calculate tight lower bound
     tight_lower_bound = 0
     for test in problem_data['tests']:
         # Update resource loads
         for r in test['resources']:
-            resource_loads[int(r[1:])-1] += test['duration']
+            resource_id = int(r[1:]) - 1
+            if resource_id < len(resource_loads):
+                resource_loads[resource_id] += test['duration']
+            else:
+                print(f"Warning: Resource {r} is out of range and will be ignored.")
         
         # Find minimum load machine among available machines
         if test['machines']:
@@ -220,7 +227,7 @@ def calculate_bounds(problem_data):
 def argmin(lst):
     return min(range(len(lst)), key=lst.__getitem__)
 
-def binary_search_optimization(model, problem_data, solver_name, timeout=300):
+def binary_search_optimization(model, problem_data, solver_name, timeout=295):
     solver = Solver.lookup(solver_name)
     instance = Instance(solver, model)
     
@@ -229,7 +236,7 @@ def binary_search_optimization(model, problem_data, solver_name, timeout=300):
     
     # Add extra 18% to upper bound if lower bound equals or exceeds upper bound initially
     if lower_bound >= upper_bound:
-        upper_bound = int(upper_bound * 1.25)
+        upper_bound = int(upper_bound * 1.335)
     
     best_solution = None
     best_makespan = upper_bound
@@ -375,7 +382,7 @@ def print_debug_info(problem_data):
     
     lower_bound, upper_bound = calculate_bounds(problem_data)
     print(f"\nLower bound (minimum makespan): {lower_bound}")
-    print(f"Upper bound (maximum makespan): {upper_bound if upper_bound > lower_bound else int(upper_bound * 1.25)}")
+    print(f"Upper bound (maximum makespan): {upper_bound if upper_bound > lower_bound else int(upper_bound * 1.335)}")
 
 def generate_dzn_content(problem_data):
     content = []
@@ -384,7 +391,7 @@ def generate_dzn_content(problem_data):
     content.append(f"R = {len(problem_data['resources'])};")
     
     lower_bound, upper_bound = calculate_bounds(problem_data)
-    content.append(f"max_makespan = {upper_bound if upper_bound > lower_bound else int(upper_bound * 1.25)};")
+    content.append(f"max_makespan = {upper_bound if upper_bound > lower_bound else int(upper_bound * 1.335)};")
     content.append(f"min_makespan = {lower_bound};")
     
     durations = [test['duration'] for test in problem_data['tests']]
@@ -443,13 +450,15 @@ if __name__ == "__main__":
         if not args.test:
             print(f"\nTrying solver: {solver_name}")
         
-        result = binary_search_optimization(model, problem_data, solver_name, timeout=300)
+        result = binary_search_optimization(model, problem_data, solver_name, timeout=290)
         
         if result:
             if args.test:
                 print(f"Makespan : {result['makespan']}")
             
             write_output(result, problem_data, args.output_file)
+            print(f"Solution written to {args.output_file}")
+
             if not args.test:
                 print(f"Solution written to {args.output_file}")
                 draw_schedule(problem_data, args.output_file)
