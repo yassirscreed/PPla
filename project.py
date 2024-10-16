@@ -419,7 +419,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Solve the scheduling problem or generate .dzn file.")
     parser.add_argument("input_file", help="Input file path")
     parser.add_argument("output_file", help="Output file path", nargs='?')
-    parser.add_argument("--test", action="store_true", help="Run in test mode (no plotting or debug output)")
+    parser.add_argument("--plot", action="store_true", help="Generate and display the schedule chart")
     parser.add_argument("--dzn", action="store_true", help="Create a .dzn file for the model and exit")
     parser.add_argument("--no-sort", action="store_true", help="Disable sorting of tests")
     args = parser.parse_args()
@@ -442,31 +442,26 @@ if __name__ == "__main__":
 
     model = create_minizinc_model(problem_data)
 
-    if not args.test:
-        print_debug_info(problem_data)
+    #print_debug_info(problem_data)
     
     solvers = ['com.google.ortools.sat', "chuffed", "gecode"]
     for solver_name in solvers:
-        if not args.test:
-            print(f"\nTrying solver: {solver_name}")
+        print(f"\nTrying solver: {solver_name}")
         
         result = binary_search_optimization(model, problem_data, solver_name, timeout=290)
         
         if result:
-            if args.test:
-                print(f"Makespan : {result['makespan']}")
+            print(f"Makespan : {result['makespan']}")
             
             write_output(result, problem_data, args.output_file)
             print(f"Solution written to {args.output_file}")
 
-            if not args.test:
-                print(f"Solution written to {args.output_file}")
+            if args.plot:
+                print("Generating schedule chart...")
                 draw_schedule(problem_data, args.output_file)
             break
         else:
-            if not args.test:
-                print(f"Failed to find a solution with {solver_name}")
+            print(f"Failed to find a solution with {solver_name}")
     
     if not result:
-        if not args.test:
-            print("Failed to find a solution with any solver.")
+        print("Failed to find a solution with any solver.")
