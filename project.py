@@ -227,16 +227,6 @@ def calculate_bounds(problem_data):
 def argmin(lst):
     return min(range(len(lst)), key=lst.__getitem__)
 
-
-def identify_sequential_tasks(problem_data):
-    sequential_pairs = []
-    for i, test1 in enumerate(problem_data['tests']):
-        for j, test2 in enumerate(problem_data['tests']):
-            if i < j and (set(test1['resources']) & set(test2['resources'])):
-                if not (set(test1['machines']) & set(test2['machines'])):
-                    sequential_pairs.append((i+1, j+1))
-    return sequential_pairs
-
 def binary_search_optimization(model, problem_data, solver_name, timeout=295):
     solver = Solver.lookup(solver_name)
     instance = Instance(solver, model)
@@ -354,22 +344,6 @@ def create_minizinc_model(problem_data, dzn_file=None):
         for test in problem_data['tests']:
             resource_sets.append({int(r[1:]) for r in test['resources']})
         model["resources"] = resource_sets
-
-        #sequential_pairs = identify_sequential_tasks(problem_data)
-       # print(f"sequential_pairs: {sequential_pairs}")
-       # model["sequential_pairs"] = sequential_pairs
-
-        #machine_to_tests = {m: [] for m in range(1, len(problem_data['machines']) + 1)}
-        #for i, test in enumerate(problem_data['tests'], 1):
-        #    if test['machines']:
-        #        for machine in test['machines']:
-        #            machine_to_tests[int(machine[1:])].append(i)
-        #    else:
-        #        for m in range(1, len(problem_data['machines']) + 1):
-        #            machine_to_tests[m].append(i)
-
-        #model["machine_to_tests"] = machine_to_tests
-        #print(f"machine_to_tests: {machine_to_tests}")
 
     return model
 
