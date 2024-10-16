@@ -42,6 +42,8 @@ def parse_input(input_text):
 		duration = int(parts[1].strip())
 		machines = ['m%d' % int(x) for x in re.sub('m', ',', parts[2].strip('[]')[1:]).split(',')] if parts[2].strip() != "[]" else []
 		resources = ['r%d' % int(x) for x in re.sub('r', ',', parts[3].strip('[]')[1:]).split(',')] if parts[3].strip() != "[]" else []
+		machines.sort()
+		resources.sort()
 		tasks[task_name] = Task(task_name, duration, machines, resources)
 	
 	return tasks
@@ -65,12 +67,11 @@ def parse_output(output_text, tasks):
 		
 		tasks_data = [x.strip('()') for x in re.split(r"\), *\(", parts[2].strip().strip("[]"))]
 		machines[machine_name] = Machine(machine_name)
-		
 		if int(parts[1].strip()) > 0:
 			for task_data in tasks_data:
 				task_data = task_data.replace("[", "").replace("]", "").replace("'", "").replace(' ', '')
 				# Split the task info (task_name, start_time, resources if available)
-				task_info = task_data.split(',')
+				task_info = task_data.split(',', maxsplit=2)
 				task_name = task_info[0].strip()
 				
 				# Ensure start_time is correctly extracted
@@ -84,9 +85,10 @@ def parse_output(output_text, tasks):
 				
 				# Extract resources if they exist
 				if len(task_info) > 2:
-					resources_used = task_info[2:] if task_info[2].strip() != '' else []
+					resources_used = task_info[2].split(',') if task_info[2].strip() != '' else []
 				else:
 					resources_used = []
+				resources_used.sort()
 				
 				# Find the task's duration from the input task dictionary
 				task_duration = tasks[task_name].duration
