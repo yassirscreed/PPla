@@ -24,7 +24,6 @@ var min_makespan..max_makespan: makespan;
 % Auxiliary Variables
 array[TESTS] of var 0..max_makespan: end_times;
 
-
 % Constraints
 % End times calculation
 constraint forall(t in TESTS) (
@@ -38,17 +37,21 @@ constraint forall(j in 1..N) (
     assigned_machines[j] in machines[j]
 );
 
+
 % Machine capacity (using cumulative)
 constraint forall(m in MACHINES) (
-    cumulative(start_times, 
-               [durations[t] | t in TESTS], 
-               [bool2int(assigned_machines[t] = m) | t in TESTS],
-               1)
+    let {
+        array[int] of var int: task_starts = [start_times[t] | t in TESTS where m in machines[t]],
+        array[int] of int: task_durations = [durations[t] | t in TESTS where m in machines[t]],
+        array[int] of var 0..1: task_resources = [bool2int(assigned_machines[t] = m) | t in TESTS where m in machines[t]]
+    } in
+    cumulative(task_starts, task_durations, task_resources, 1)
 );
 
 
+
 % Resource constraints (using cumulative)
-constraint forall(r in RESOURCES) (
+constraint forall(r in RESOURCES where exists(t in TESTS)(r in resources[t])) (
     cumulative(start_times,
                durations,
                [bool2int(r in resources[t]) | t in TESTS],
