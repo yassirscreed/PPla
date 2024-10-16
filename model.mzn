@@ -24,7 +24,22 @@ var min_makespan..max_makespan: makespan;
 % Auxiliary Variables
 array[TESTS] of var 0..max_makespan: end_times;
 
+array[TESTS, MACHINES] of int: task_resources;
+
+% Auxiliary variable: for each task and machine, is the task assigned to that machine?
+array[TESTS, MACHINES] of var 0..1: task_machine_assignment;
+
 % Constraints
+
+constraint forall(t in TESTS, m in MACHINES)(
+    task_machine_assignment[t, m] = bool2int(assigned_machines[t] = m)
+);
+
+constraint forall(t in TESTS, m in MACHINES)(
+    task_machine_assignment[t, m] <= task_resources[t, m]
+);
+
+
 % End times calculation
 constraint forall(t in TESTS) (
     end_times[t] = start_times[t] + durations[t]
@@ -38,16 +53,20 @@ constraint forall(j in 1..N) (
 );
 
 
-% Machine capacity (using cumulative)
-constraint forall(m in MACHINES) (
-    let {
-        array[int] of var int: task_starts = [start_times[t] | t in TESTS where m in machines[t]],
-        array[int] of int: task_durations = [durations[t] | t in TESTS where m in machines[t]],
-        array[int] of var 0..1: task_resources = [bool2int(assigned_machines[t] = m) | t in TESTS where m in machines[t]]
-    } in
-    cumulative(task_starts, task_durations, task_resources, 1)
+% Ensure assigned machines are compatible
+constraint forall(t in TESTS) (
+    task_resources[t, assigned_machines[t]] = 1
 );
 
+% Machine capacity constraint using cumulative
+constraint forall(m in MACHINES)(
+    cumulative(start_times,
+               durations,
+               [task_machine_assignment[t, m] | t in TESTS],
+               1)
+);
+
+% experimentar symmetry breaking para reduzir o loop
 
 
 % Resource constraints (using cumulative)
@@ -91,12 +110,13 @@ constraint max(end_times) = makespan;
 
 
 % Search annotation
-solve %:: seq_search([
-   % int_search(assigned_machines, first_fail, indomain_random),
-  %  int_search(start_times, smallest, indomain_min),
- %   int_search([makespan], input_order, indomain_min)
+solve 
+%:: seq_search([
+%    int_search(assigned_machines, first_fail, indomain_random),
+%    int_search(start_times, smallest, indomain_min),
+%    int_search([makespan], input_order, indomain_min)
 %])
-%:: int_search(start_times, smallest, indomain_min)
+%:: relax_and_reconstruct( start_times ++ assigned_machines, 60)
 satisfy;
 
 % Output

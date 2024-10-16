@@ -227,6 +227,44 @@ def calculate_bounds(problem_data):
 def argmin(lst):
     return min(range(len(lst)), key=lst.__getitem__)
 
+def precompute_machine_compatibility(problem_data):
+    M = len(problem_data['machines'])
+    N = len(problem_data['tests'])
+    compatibility = [0] * (M * N)
+    for i, test in enumerate(problem_data['tests']):
+        if not test['machines']:
+            for j in range(M):
+                compatibility[i*M + j] = 1
+        else:
+            for m in test['machines']:
+                compatibility[i*M + int(m[1:])-1] = 1
+    return compatibility
+
+def precompute_task_resources(problem_data):
+    N = len(problem_data['tests'])
+    M = len(problem_data['machines'])
+    
+    # Precompute task_resources array
+    task_resources = np.zeros((N, M), dtype=int)
+    for t in range(N):
+        if not problem_data['tests'][t]['machines']:  # If no machines specified, task can run on any machine
+            task_resources[t, :] = 1
+        else:
+            for m in problem_data['tests'][t]['machines']:
+                task_resources[t, int(m[1:])-1] = 1
+    
+    if args.dzn:
+        task_resources_str = '[|\n'
+        for t in range(N):
+            task_resources_str += '                  '
+            task_resources_str += ', '.join(str(task_resources[t, m]) for m in range(M))
+            task_resources_str += '|\n'
+        task_resources_str = task_resources_str.rstrip('\n') + ']'
+        
+        return task_resources_str
+    # Return the numpy array directly
+    return task_resources
+
 def binary_search_optimization(model, problem_data, solver_name, timeout=295):
     solver = Solver.lookup(solver_name)
     instance = Instance(solver, model)
@@ -234,9 +272,8 @@ def binary_search_optimization(model, problem_data, solver_name, timeout=295):
     lower_bound, upper_bound = calculate_bounds(problem_data)
     
     
-    # Add extra 18% to upper bound if lower bound equals or exceeds upper bound initially
     if lower_bound >= upper_bound:
-        upper_bound = int(upper_bound * 1.335)
+        upper_bound = int(upper_bound * 1.395)
     
     lower_bound -= 100
     best_solution = None
@@ -345,6 +382,8 @@ def create_minizinc_model(problem_data, dzn_file=None):
             resource_sets.append({int(r[1:]) for r in test['resources']})
         model["resources"] = resource_sets
 
+        model["task_resources"] = precompute_task_resources(problem_data)
+
     return model
 
 def write_output(result, problem_data, output_file):
@@ -385,7 +424,7 @@ def print_debug_info(problem_data):
     
     lower_bound, upper_bound = calculate_bounds(problem_data)
     print(f"\nLower bound (minimum makespan): {lower_bound}")
-    print(f"Upper bound (maximum makespan): {upper_bound if upper_bound > lower_bound else int(upper_bound * 1.335)}")
+    print(f"Upper bound (maximum makespan): {upper_bound if upper_bound > lower_bound else int(upper_bound * 1.395)}")
 
 def generate_dzn_content(problem_data):
     content = []
@@ -394,7 +433,7 @@ def generate_dzn_content(problem_data):
     content.append(f"R = {len(problem_data['resources'])};")
     
     lower_bound, upper_bound = calculate_bounds(problem_data)
-    content.append(f"max_makespan = {upper_bound if upper_bound > lower_bound else int(upper_bound * 1.335)};")
+    content.append(f"max_makespan = {upper_bound if upper_bound > lower_bound else int(upper_bound * 1.395)};")
     content.append(f"min_makespan = {lower_bound};")
     
     durations = [test['duration'] for test in problem_data['tests']]
@@ -415,6 +454,10 @@ def generate_dzn_content(problem_data):
         resource_set = "{" + ", ".join(str(int(r[1:])) for r in test['resources']) + "}"
         resource_sets.append(resource_set)
     content.append(f"resources = [{', '.join(resource_sets)}];")
+
+    # Include precomputed task_resources
+    task_resources_str = precompute_task_resources(problem_data)
+    content.append(f"task_resources = {task_resources_str};")
     
     return "\n".join(content)
 
