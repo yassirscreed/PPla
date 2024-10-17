@@ -1,6 +1,6 @@
 # Test Scheduling Problem as a CSP
 
-## Group 
+## Group -  22
 - Yassir Yassin 100611
 - Rodrigo Laia 102674
 
