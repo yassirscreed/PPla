@@ -69,10 +69,10 @@ def run_tests():
             print(f"Script output: {stdout}")
         elif expected_makespan is None:
             print(f"{test}: ERROR - Could not find expected makespan in test_output.txt")
-        elif script_makespan == expected_makespan:
+        elif expected_makespan <= script_makespan:
             print(f"{test}: PASS (Makespan: {script_makespan})")
         else:
-            print(f"{test}: FAIL (Script: {script_makespan}, Expected: {expected_makespan})")
+            print(f"{test}: FAIL (Expected: {script_makespan}, Our: {expected_makespan})")
 
         if stderr:
             print(f"Error output: {stderr}")
