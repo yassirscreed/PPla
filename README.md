@@ -46,4 +46,5 @@ The output file will contain:
 
 ## Implementation Details
 - The solution is implemented in `proj.py`
+- [Reference solution](https://github.com/markojurkovic/test-scheduler) in Solutions
 - [MiniZinc Python](https://python.minizinc.dev/) may be used for integration with the MiniZinc solver
