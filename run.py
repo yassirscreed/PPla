@@ -31,7 +31,7 @@ def run_test(test_file):
     try:
         # Run the Python script with the test file
         process = subprocess.Popen(
-            ['python', 'project.py', str(test_file), unique_output_file],
+            ['python', 'proj.py', str(test_file), unique_output_file],
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE
         )
