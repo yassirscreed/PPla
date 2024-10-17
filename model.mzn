@@ -39,7 +39,6 @@ constraint forall(t in TESTS, m in MACHINES)(
     task_machine_assignment[t, m] <= task_resources[t, m]
 );
 
-
 % End times calculation
 constraint forall(t in TESTS) (
     end_times[t] = start_times[t] + durations[t]
@@ -51,7 +50,6 @@ constraint makespan = max(end_times);
 constraint forall(j in 1..N) (
     assigned_machines[j] in machines[j]
 );
-
 
 % Ensure assigned machines are compatible
 constraint forall(t in TESTS) (
@@ -66,9 +64,6 @@ constraint forall(m in MACHINES)(
                1)
 );
 
-% experimentar symmetry breaking para reduzir o loop
-
-
 % Resource constraints (using cumulative)
 constraint forall(r in RESOURCES where exists(t in TESTS)(r in resources[t])) (
     cumulative(start_times,
@@ -76,7 +71,6 @@ constraint forall(r in RESOURCES where exists(t in TESTS)(r in resources[t])) (
                [bool2int(r in resources[t]) | t in TESTS],
                1)
 );
-
 
 % Makespan constraint
 constraint makespan = max(end_times);
@@ -88,7 +82,6 @@ constraint sum(durations) <= makespan * M;
 constraint makespan >= sum(durations) div M;
 
 % Symmetry breaking constraints
-
 constraint symmetry_breaking_constraint(
     lex_lesseq([start_times[i] | i in TESTS where card(machines[i]) = M],
                [start_times[j] | j in TESTS where card(machines[j]) = M])
@@ -99,25 +92,13 @@ constraint forall(i, j in TESTS where i < j /\ resources[i] = resources[j] /\ du
 );
 
 % Additional redundant constraints
-
-% 4. Ensure all tasks start before the makespan minus their duration
+% Ensure all tasks start before the makespan minus their duration
 constraint forall(t in TESTS) (
     start_times[t] <= makespan - durations[t]
 );
 
 % Ensure the maximum end time of any task is equal to the makespan
 constraint max(end_times) = makespan;
-
-
-% Search annotation
-solve 
-%:: seq_search([
-%    int_search(assigned_machines, first_fail, indomain_random),
-%    int_search(start_times, smallest, indomain_min),
-%    int_search([makespan], input_order, indomain_min)
-%])
-%:: relax_and_reconstruct( start_times ++ assigned_machines, 60)
-satisfy;
 
 % Output
 output [
@@ -136,3 +117,5 @@ output [
     ++ "])\n"
     | m in MACHINES
 ];
+
+% The solve item will be added dynamically by the Python script

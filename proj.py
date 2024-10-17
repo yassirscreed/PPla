@@ -265,12 +265,11 @@ def precompute_task_resources(problem_data):
     # Return the numpy array directly
     return task_resources
 
-def binary_search_optimization(model, problem_data, solver_name, timeout=295):
+def binary_search_optimization(model, problem_data, solver_name, output_file, timeout=295):
     solver = Solver.lookup(solver_name)
     instance = Instance(solver, model)
     
     lower_bound, upper_bound = calculate_bounds(problem_data)
-    
     
     if lower_bound >= upper_bound:
         upper_bound = int(upper_bound * 1.395)
@@ -281,69 +280,83 @@ def binary_search_optimization(model, problem_data, solver_name, timeout=295):
     
     print(f"Initial lower bound: {lower_bound}")
     print(f"Initial upper bound: {upper_bound}")
-
-    
     
     iteration = 0
     start_time = time.time()
-    while lower_bound <= upper_bound:
+    use_advanced_search = False
+    
+    while lower_bound <= upper_bound and time.time() - start_time < timeout:
         iteration += 1
         
         # Dynamic makespan selection
         if iteration == 1:
-            # Start with the upper bound for the first iteration
             current_makespan = upper_bound
         else:
-            # Use exponential back-off strategy
             current_makespan = max(lower_bound, min(upper_bound, int(lower_bound * (1.5 ** (iteration - 1)))))
         
         # Create a new branch of the model for this iteration
         with instance.branch() as child:
-            # Assign the new max_makespan
             child["max_makespan"] = current_makespan
             
             print(f"\nIteration {iteration}:")
             print(f"  Current makespan: {current_makespan}")
+            print(f"  Using advanced search: {use_advanced_search}")
             
             remaining_time = max(0, timeout - (time.time() - start_time))
-            result = child.solve(timeout=timedelta(seconds=remaining_time))
+            iteration_start_time = time.time()
             
+            if use_advanced_search:
+                child.add_string("""
+                solve :: seq_search([
+                    int_search(assigned_machines, first_fail, indomain_random),
+                    int_search(start_times, smallest, indomain_min),
+                    int_search([makespan], input_order, indomain_min)
+                ]) :: relax_and_reconstruct(start_times ++ assigned_machines, 60)
+                satisfy;
+                """)
+            else:
+                child.add_string("solve satisfy;")
+            
+            result = child.solve(timeout=timedelta(seconds=min(remaining_time, 90)))
+            
+            iteration_time = time.time() - iteration_start_time
+            print(f"  Iteration time: {iteration_time:.2f} seconds")
             print(f"  Solver status: {result.status}")
-            print(f"  Statistics: {result.statistics}")
+            #print(f"  Statistics: {result.statistics}")
 
-            if result.status == Status.SATISFIED or result.status == Status.ALL_SOLUTIONS:
+            if iteration_time > 90 and not use_advanced_search:
+                use_advanced_search = True
+                print("  Switching to advanced search for next iteration")
+                continue  # Skip the rest of this iteration and start a new one with advanced search
+
+            if result.status in [Status.SATISFIED, Status.ALL_SOLUTIONS, Status.OPTIMAL_SOLUTION]:
                 best_solution = result
                 best_makespan = result["makespan"]
 
-                # Calculate end times
                 machine_makespan, resource_makespan = calculate_end_times(result, problem_data)
-                
-                # Update the makespan if necessary
                 best_makespan = max(best_makespan, machine_makespan, resource_makespan)
+
+                write_output(best_solution, problem_data, output_file)
+                print(f"  Wrote current best solution to {output_file}")
 
                 upper_bound = best_makespan - 1
                 print(f"  Found solution with makespan: {best_makespan}")
                 print(f"  Machine makespan: {machine_makespan}")
                 print(f"  Resource makespan: {resource_makespan}")
                 print(f"  New upper bound: {upper_bound}")
+
+                if result.status == Status.OPTIMAL_SOLUTION:
+                    print(f"  Found optimal solution with makespan: {best_makespan}")
+                    solve_time = time.time() - start_time
+                    print(f"  Time taken to solve: {solve_time:.2f} seconds")
+                    return best_solution
             elif result.status == Status.UNSATISFIABLE:
                 lower_bound = current_makespan + 1
                 print(f"  No solution found. New lower bound: {lower_bound}")
-            elif result.status == Status.OPTIMAL_SOLUTION:
-                best_solution = result
-                best_makespan = result["makespan"]
-                upper_bound = best_makespan - 1
-                print(f"  Found optimal solution with makespan: {best_makespan}")
-                solve_time = time.time() - start_time
-                print(f"  Time taken to solve: {solve_time:.2f} seconds")
-                return best_solution
             else:
                 print(f"  Search stopped due to {result.status}")
-                break
-        
-        if time.time() - start_time > timeout:
-            print(f"Timeout reached after {timeout} seconds")
-            break
+                if use_advanced_search:
+                    break  # If we're already using advanced search and still get UNKNOWN, we break the loop
     
     solve_time = time.time() - start_time
     print(f"\nFinal best makespan: {best_makespan}")
@@ -421,10 +434,7 @@ def print_debug_info(problem_data):
     print(f"\nNumber of tests: {len(problem_data['tests'])}")
     print(f"Number of machines: {len(problem_data['machines'])}")
     print(f"Number of resources: {len(problem_data['resources'])}")
-    
-    lower_bound, upper_bound = calculate_bounds(problem_data)
-    print(f"\nLower bound (minimum makespan): {lower_bound}")
-    print(f"Upper bound (maximum makespan): {upper_bound if upper_bound > lower_bound else int(upper_bound * 1.395)}")
+
 
 def generate_dzn_content(problem_data):
     content = []
@@ -488,26 +498,19 @@ if __name__ == "__main__":
 
     model = create_minizinc_model(problem_data)
 
-    #print_debug_info(problem_data)
+   # print_debug_info(problem_data)
     
-    solvers = ['com.google.ortools.sat', "chuffed", "gecode"]
-    for solver_name in solvers:
-        print(f"\nTrying solver: {solver_name}")
-        
-        result = binary_search_optimization(model, problem_data, solver_name, timeout=290)
-        
-        if result:
-            print(f"Makespan : {result['makespan']}")
-            
-            write_output(result, problem_data, args.output_file)
-            print(f"Solution written to {args.output_file}")
+    solver_name = 'com.google.ortools.sat'
+    print(f"\nUsing solver: {solver_name}")
+    
+    result = binary_search_optimization(model, problem_data, solver_name, args.output_file, timeout=290)
+    
+    if result:
+        print(f"Makespan : {result['makespan']}")
+        print(f"Solution written to {args.output_file}")
 
-            if args.plot:
-                print("Generating schedule chart...")
-                draw_schedule(problem_data, args.output_file)
-            break
-        else:
-            print(f"Failed to find a solution with {solver_name}")
-    
-    if not result:
-        print("Failed to find a solution with any solver.")
+        if args.plot:
+            print("Generating schedule chart...")
+            draw_schedule(problem_data, args.output_file)
+    else:
+        print(f"Failed to find a solution with {solver_name}")
