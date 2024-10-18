@@ -265,7 +265,7 @@ def precompute_task_resources(problem_data):
     # Return the numpy array directly
     return task_resources
 
-def binary_search_optimization(model, problem_data, solver_name, output_file, timeout=295):
+def binary_search_optimization(model, problem_data, solver_name, output_file, timeout=285):
     solver = Solver.lookup(solver_name)
     instance = Instance(solver, model)
     
@@ -314,10 +314,12 @@ def binary_search_optimization(model, problem_data, solver_name, output_file, ti
                 ]) :: relax_and_reconstruct(start_times ++ assigned_machines, 60)
                 satisfy;
                 """)
+                iteration_timeout = remaining_time
             else:
                 child.add_string("solve satisfy;")
+                iteration_timeout = min(remaining_time, 90)
             
-            result = child.solve(timeout=timedelta(seconds=min(remaining_time, 90)))
+            result = child.solve(timeout=timedelta(seconds=iteration_timeout))
             
             iteration_time = time.time() - iteration_start_time
             print(f"  Iteration time: {iteration_time:.2f} seconds")
@@ -503,7 +505,7 @@ if __name__ == "__main__":
     solver_name = 'com.google.ortools.sat'
     print(f"\nUsing solver: {solver_name}")
     
-    result = binary_search_optimization(model, problem_data, solver_name, args.output_file, timeout=290)
+    result = binary_search_optimization(model, problem_data, solver_name, args.output_file, timeout=285)
     
     if result:
         print(f"Makespan : {result['makespan']}")
